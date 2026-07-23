@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="NexusRun packages an AI agent as a portable OCI artifact that runs without containers, and reports honestly on what your hardware can actually execute.">
+<title>NexusRun — portable AI units</title>
+
+<style>
+  :root {
+    --ground:   #12161A;
+    --panel:    #191E23;
+    --panel-2:  #1F252B;
+    --rule:     #2A3138;
+    --ink:      #E4E9ED;
+    --muted:    #8C959D;
+    --dim:      #616B74;
+    --accent:   #FF6B2C;
+    --accent-q: #4A2415;
+    --ok:       #56B48A;
+    --warn:     #D9A441;
+    --off:      #545E67;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    --measure: 68ch;
+    --pad: clamp(1.25rem, 4vw, 2.5rem);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ground:   #F6F7F8;
+      --panel:    #FFFFFF;
+      --panel-2:  #F0F2F4;
+      --rule:     #DCE0E4;
+      --ink:      #14191E;
+      --muted:    #5E686F;
+      --dim:      #838D95;
+      --accent:   #C7440C;
+      --accent-q: #FBE7DC;
+      --ok:       #247A55;
+      --warn:     #966A10;
+      --off:      #97A0A8;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #12161A;
+    --panel:    #191E23;
+    --panel-2:  #1F252B;
+    --rule:     #2A3138;
+    --ink:      #E4E9ED;
+    --muted:    #8C959D;
+    --dim:      #616B74;
+    --accent:   #FF6B2C;
+    --accent-q: #4A2415;
+    --ok:       #56B48A;
+    --warn:     #D9A441;
+    --off:      #545E67;
+  }
+
+  :root[data-theme="light"] {
+    --ground:   #F6F7F8;
+    --panel:    #FFFFFF;
+    --panel-2:  #F0F2F4;
+    --rule:     #DCE0E4;
+    --ink:      #14191E;
+    --muted:    #5E686F;
+    --dim:      #838D95;
+    --accent:   #C7440C;
+    --accent-q: #FBE7DC;
+    --ok:       #247A55;
+    --warn:     #966A10;
+    --off:      #97A0A8;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 var(--pad);
+  }
+
+  /* ---------- type ---------- */
+
+  h1, h2, h3, .label, code, kbd, pre, .stat-n {
+    font-family: var(--mono);
+  }
+
+  h1 {
+    font-size: clamp(2.1rem, 6vw, 3.4rem);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-size: clamp(1.25rem, 2.6vw, 1.6rem);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 0.95rem;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+
+  .lede {
+    font-size: clamp(1.05rem, 2vw, 1.2rem);
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--dim);
+    font-weight: 500;
+  }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- rhythm ---------- */
+
+  section { padding-block: clamp(3rem, 7vw, 5rem); }
+  section + section { border-top: 1px solid var(--rule); }
+
+  .stack   { display: flex; flex-direction: column; gap: 1rem; }
+  .stack-l { display: flex; flex-direction: column; gap: 2rem; }
+  .stack-s { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  /* ---------- hero ---------- */
+
+  .hero { padding-top: clamp(2.5rem, 6vw, 4rem); }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 2.5rem;
+  }
+  .brand-mark {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: -0.02em;
+  }
+  .brand-mark::before {
+    content: "▚";
+    color: var(--accent);
+    margin-right: 0.45rem;
+  }
+  .brand-tag {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .hero-grid {
+    display: grid;
+    gap: clamp(2rem, 5vw, 3.5rem);
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  @media (min-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .accent-line { color: var(--accent); }
+
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  /* ---------- copy field ---------- */
+
+  .copy {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    border-radius: 3px;
+    overflow: hidden;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    max-width: 100%;
+  }
+  .copy code {
+    padding: 0.7rem 0.9rem;
+    white-space: nowrap;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+  .copy code::before { content: "$ "; color: var(--dim); }
+  .copy button {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 0;
+    border-left: 1px solid var(--rule);
+    background: var(--panel-2);
+    color: var(--muted);
+    padding: 0 0.95rem;
+    cursor: pointer;
+    transition: color 120ms ease, background 120ms ease;
+  }
+  .copy button:hover { color: var(--accent); background: var(--accent-q); }
+  .copy button[data-done="1"] { color: var(--ok); }
+
+  /* ---------- instrument panel ---------- */
+
+  .panel {
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--rule);
+  }
+  .panel-body { padding: 0.9rem; overflow-x: auto; }
+
+  .readout {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.85;
+    white-space: pre;
+    color: var(--muted);
+    margin: 0;
+  }
+  .readout .k { color: var(--ink); }
+
+  /* status lamp + pill */
+
+  .lamp {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+    vertical-align: 0.05em;
+    flex: none;
+  }
+  .lamp-ok   { background: var(--ok);   box-shadow: 0 0 6px var(--ok); }
+  .lamp-warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .lamp-off  { background: var(--off); }
+
+  .pill {
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .pill-ok   { color: var(--ok); }
+  .pill-warn { color: var(--warn); }
+  .pill-off  { color: var(--off); }
+
+  /* ---------- device / backend rows ---------- */
+
+  .rows { display: flex; flex-direction: column; }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(120px, auto) 1fr auto;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    padding: 0.55rem 0;
+    border-bottom: 1px dashed var(--rule);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row-name { color: var(--ink); display: flex; align-items: center; }
+  .row-note { color: var(--muted); font-size: 0.74rem; }
+  @media (max-width: 620px) {
+    .row { grid-template-columns: 1fr auto; }
+    .row-note { grid-column: 1 / -1; }
+  }
+
+  /* ---------- feature cards ---------- */
+
+  .cards {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 800px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+  .card {
+    background: var(--panel);
+    padding: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+  .card p { color: var(--muted); font-size: 0.92rem; }
+
+  /* ---------- code block ---------- */
+
+  pre.code {
+    margin: 0;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    line-height: 1.75;
+    color: var(--ink);
+  }
+  pre.code .c { color: var(--dim); }
+  pre.code .p { color: var(--accent); }
+
+  /* ---------- comparison table ---------- */
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--rule); }
+  thead th {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-weight: 500;
+    background: var(--panel-2);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody th { font-weight: 400; color: var(--ink); }
+  td.mark { text-align: center; font-family: var(--mono); width: 1%; white-space: nowrap; }
+  .yes { color: var(--ok); }
+  .no  { color: var(--off); }
+  .part { color: var(--warn); }
+  tbody tr.self { background: var(--accent-q); }
+  tbody tr.self th { font-weight: 600; }
+
+  /* ---------- stats ---------- */
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  @media (min-width: 760px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+  .stat { background: var(--panel); padding: 1.1rem; display: flex; flex-direction: column; gap: 0.2rem; }
+  .stat-n {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .stat-l { font-size: 0.78rem; color: var(--muted); }
+
+  /* ---------- honesty ledger ---------- */
+
+  .ledger { display: grid; gap: 1.5rem; grid-template-columns: 1fr; }
+  @media (min-width: 820px) { .ledger { grid-template-columns: 1fr 1fr; } }
+  .ledger ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  .ledger li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.6rem;
+    align-items: start;
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .ledger li b { color: var(--ink); font-weight: 600; }
+  .tick { font-family: var(--mono); line-height: 1.55; }
+
+  /* ---------- steps ---------- */
+
+  .steps { display: flex; flex-direction: column; gap: 1.5rem; counter-reset: step; }
+  .step { display: grid; grid-template-columns: auto 1fr; gap: 1rem; align-items: start; }
+  .step-n {
+    counter-increment: step;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--accent);
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    width: 1.9rem; height: 1.9rem;
+    display: grid; place-items: center;
+    border-radius: 2px;
+    flex: none;
+  }
+  .step-n::before { content: counter(step, decimal-leading-zero); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-block: 2.5rem 3.5rem;
+    color: var(--dim);
+    font-size: 0.85rem;
+  }
+  .foot-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; align-items: baseline; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="brand">
+      <span class="brand-mark">nexusrun</span>
+      <span class="brand-tag">portable ai units</span>
+    </div>
+
+    <div class="hero-grid">
+      <div class="stack-l">
+        <div class="stack">
+          <h1>Package an agent once.<br><span class="accent-line">Run it on whatever<br>hardware you land on.</span></h1>
+          <p class="lede">
+            NexusRun bundles a model, its prompts, its config and its hardware
+            preferences into a standard OCI artifact — then runs it on the fastest
+            accelerator the host can <em>actually</em> use. No container runtime,
+            no Python environment, no daemon. One static binary, about 3&nbsp;MB.
+          </p>
+        </div>
+
+        <div class="stack">
+          <span class="label">Build it</span>
+          <div class="copy">
+            <code id="cmd-install">git clone https://github.com/lanceseidman/nexusrun &amp;&amp; cd nexusrun &amp;&amp; make build</code>
+            <button type="button" data-copy="cmd-install">Copy</button>
+          </div>
+          <p style="font-size:0.82rem;color:var(--dim)">
+            Needs Go 1.26+. Cross-compiles to 8 targets — Linux, macOS, Windows and
+            FreeBSD — as static, CGO-free binaries with no runtime dependencies.
+            To actually run models you'll also want llama.cpp or Ollama.
+          </p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span class="label">nexus doctor</span>
+          <span class="pill pill-warn">1 device unusable</span>
+        </div>
+        <div class="panel-body stack">
+          <div>
+            <span class="label">Detected hardware</span>
+            <div class="rows">
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>GPU</span>
+                <span class="row-note">nvidia Quadro RTX 5000 · 16 GB</span>
+                <span class="pill pill-ok">present</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>CPU</span>
+                <span class="row-note">Intel Xeon W-10885M · 16 cores · avx2</span>
+                <span class="pill pill-ok">present</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span class="label">Backend capability</span>
+            <div class="rows">
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>llama.cpp</span>
+                <span class="row-note">CPU-only build — no GPU backend compiled in</span>
+                <span class="pill pill-ok">ready</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>llama.cpp/server</span>
+                <span class="row-note">keeps models warm between runs</span>
+                <span class="pill pill-ok">ready</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-off"></span>onnxruntime</span>
+                <span class="row-note">shared library not found — needed for NPU</span>
+                <span class="pill pill-off">off</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="readout"><span class="k">Usable devices:</span> GPU, CPU</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="stack-l">
+      <div class="stack">
+        <span class="label">The idea</span>
+        <h2>Detecting a GPU is not the same as being able to use it.</h2>
+        <p style="color:var(--muted)">
+          The machine above has a healthy Quadro RTX 5000. The driver works.
+          <code style="font-size:0.85em">nvidia-smi</code> reports it happily. And llama.cpp
+          still cannot touch it, because that build was compiled without CUDA.
+        </p>
+        <p style="color:var(--muted)">
+          Most tools check whether a device exists and schedule onto it. When the
+          backend can't actually drive it, they fall back to the CPU without saying
+          so — and every benchmark and capability claim quietly becomes a lie.
+          NexusRun schedules on the <strong>intersection</strong> of what the machine
+          has and what the installed runtimes can genuinely execute on, and tells you
+          when those two disagree.
+        </p>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <h3>Reuses models you already have</h3>
+          <p>
+            A unit references a model instead of embedding it. Already pulled it with
+            Ollama? NexusRun runs that exact blob from Ollama's store — no second
+            download, no second copy on disk.
+          </p>
+          <p style="color:var(--dim);font-size:0.85rem">A typical unit is under 1 KB, because it's metadata, not weights.</p>
+        </div>
+        <div class="card">
+          <h3>Sealed units for air-gapped machines</h3>
+          <p>
+            When you need self-containment, <code style="font-size:0.85em">--seal</code>
+            embeds the weights as OCI layers and <code style="font-size:0.85em">export</code>
+            writes one file you can carry on a USB stick.
+          </p>
+          <p style="color:var(--dim);font-size:0.85rem">Verified: imported to an empty store and generated with no network and no Ollama.</p>
+        </div>
+        <div class="card">
+          <h3>Any registry, no special support</h3>
+          <p>
+            Units are ordinary OCI artifacts, so they push and pull from ghcr.io,
+            Docker Hub, ECR, Harbor or a local zot — with their auth, signing and
+            retention already solved.
+          </p>
+          <p style="color:var(--dim);font-size:0.85rem">Tested against a stock registry:2 with zero server-side changes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="stack-l">
+      <div class="stack">
+        <span class="label">Measured, not assumed</span>
+        <h2>Numbers from a real run.</h2>
+        <p style="color:var(--muted)">
+          A 2.2 GB model on the CPU-only machine above. Accelerators are not
+          automatically faster — for small models the transfer overhead can exceed
+          the compute win, so <code style="font-size:0.85em">nexus bench</code> measures
+          each device instead of guessing.
+        </p>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-n">5.3s</span>
+          <span class="stat-l">Cold start, first run</span>
+        </div>
+        <div class="stat">
+          <span class="stat-n">2.4s</span>
+          <span class="stat-l">Warm, model resident</span>
+        </div>
+        <div class="stat">
+          <span class="stat-n">676 B</span>
+          <span class="stat-l">Unit artifact size</span>
+        </div>
+        <div class="stat">
+          <span class="stat-n">3.2 MB</span>
+          <span class="stat-l">The whole runtime</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="stack-l">
+      <div class="stack">
+        <span class="label">Where it fits</span>
+        <h2>A layer above the inference engine, not a replacement for one.</h2>
+        <p style="color:var(--muted)">
+          NexusRun delegates generation to llama.cpp or Ollama. What it adds is
+          packaging, distribution, and honest hardware scheduling.
+        </p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">&nbsp;</th>
+              <th scope="col">Packages the agent</th>
+              <th scope="col">No container runtime</th>
+              <th scope="col">Any OCI registry</th>
+              <th scope="col">Reuses local models</th>
+              <th scope="col">Reports capability</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="self">
+              <th scope="row">NexusRun</th>
+              <td class="mark yes">yes</td>
+              <td class="mark yes">yes</td>
+              <td class="mark yes">yes</td>
+              <td class="mark yes">yes</td>
+              <td class="mark yes">yes</td>
+            </tr>
+            <tr>
+              <th scope="row">Ollama</th>
+              <td class="mark no">model only</td>
+              <td class="mark yes">yes</td>
+              <td class="mark part">own registry</td>
+              <td class="mark no">—</td>
+              <td class="mark no">no</td>
+            </tr>
+            <tr>
+              <th scope="row">Docker cagent</th>
+              <td class="mark yes">yes</td>
+              <td class="mark no">needs Docker</td>
+              <td class="mark yes">yes</td>
+              <td class="mark no">no</td>
+              <td class="mark no">no</td>
+            </tr>
+            <tr>
+              <th scope="row">llama.cpp</th>
+              <td class="mark no">no</td>
+              <td class="mark yes">yes</td>
+              <td class="mark no">no</td>
+              <td class="mark part">manual</td>
+              <td class="mark no">no</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="stack-l">
+      <div class="stack">
+        <span class="label">Status</span>
+        <h2>What works, and what doesn't.</h2>
+        <p style="color:var(--muted)">
+          Never silently fall back is the project's one hard rule. It applies to this
+          page too — so here is the unedited ledger.
+        </p>
+      </div>
+
+      <div class="ledger">
+        <div class="stack-s">
+          <span class="label"><span class="lamp lamp-ok"></span>Verified end to end on Linux</span>
+          <ul>
+            <li><span class="tick" style="color:var(--ok)">+</span><span><b>Build, run and share</b> — packaging, the OCI store, and export/import round trips</span></li>
+            <li><span class="tick" style="color:var(--ok)">+</span><span><b>Push and pull</b> against a stock registry:2, needing no server-side support</span></li>
+            <li><span class="tick" style="color:var(--ok)">+</span><span><b>Ollama model reuse</b> — runs weights Ollama already downloaded, no copy</span></li>
+            <li><span class="tick" style="color:var(--ok)">+</span><span><b>Air-gapped execution</b> from sealed weights, with no network and no Ollama</span></li>
+            <li><span class="tick" style="color:var(--ok)">+</span><span><b>Warm-model daemon</b>, plus a read-only web console for units, hardware and run history</span></li>
+            <li><span class="tick" style="color:var(--ok)">+</span><span><b>Kernel-enforced sandboxing</b> — script units confined by Landlock to what they declare</span></li>
+          </ul>
+        </div>
+
+        <div class="stack-s">
+          <span class="label"><span class="lamp lamp-warn"></span>Not done, and not pretended otherwise</span>
+          <ul>
+            <li><span class="tick" style="color:var(--warn)">–</span><span><b>NPU execution.</b> Detection and scheduling exist; the ONNX Runtime backend returns a clear error rather than quietly using the CPU</span></li>
+            <li><span class="tick" style="color:var(--warn)">–</span><span><b>GPU execution</b> is implemented but unverified — the development machine's llama.cpp has no CUDA compiled in, so nothing has ever generated on it</span></li>
+            <li><span class="tick" style="color:var(--warn)">–</span><span><b>Sandboxing is Linux-only.</b> On macOS and Windows, script units refuse to run without <code style="font-size:0.85em">--no-sandbox</code></span></li>
+            <li><span class="tick" style="color:var(--warn)">–</span><span><b>Tools and MCP.</b> The manifest accepts a <code style="font-size:0.85em">tools:</code> list that nothing consumes yet</span></li>
+            <li><span class="tick" style="color:var(--warn)">–</span><span><b>Composition is a pipeline</b>, not a graph — no branching or conditionals</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="stack-l">
+      <div class="stack">
+        <span class="label">Getting started</span>
+        <h2>Four commands to a shareable agent.</h2>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <span class="step-n"></span>
+          <div class="stack-s">
+            <h3>See what your machine can actually do</h3>
+            <div class="copy"><code id="c1">nexus doctor</code><button type="button" data-copy="c1">Copy</button></div>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n"></span>
+          <div class="stack-s">
+            <h3>Scaffold a unit</h3>
+            <div class="copy"><code id="c2">nexus init my-agent --model llama3.1:8b</code><button type="button" data-copy="c2">Copy</button></div>
+            <p style="color:var(--muted);font-size:0.9rem">
+              A unit is one small YAML file — the model, the system prompt, and the
+              hardware preference order.
+            </p>
+            <pre class="code"><span class="c"># nexus.yaml</span>
+name: research-agent
+version: 0.1.0
+
+models:
+  - source: <span class="p">ollama:llama3.1:8b</span>   <span class="c"># already on disk? just use it</span>
+    context: 8192
+
+entrypoint:
+  type: chat
+  system_prompt: |
+    You are a careful research assistant.
+
+hardware:
+  prefer: [npu, gpu, cpu]      <span class="c"># first *usable* one wins</span></pre>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n"></span>
+          <div class="stack-s">
+            <h3>Build and run it</h3>
+            <div class="copy"><code id="c3">nexus build my-agent &amp;&amp; nexus run my-agent:0.1.0 -p "hi"</code><button type="button" data-copy="c3">Copy</button></div>
+            <p style="color:var(--muted);font-size:0.9rem">
+              Point <code style="font-size:0.85em">run</code> straight at the directory while you're
+              developing — it skips packaging entirely.
+            </p>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n"></span>
+          <div class="stack-s">
+            <h3>Share it anywhere</h3>
+            <div class="copy"><code id="c4">nexus push my-agent:0.1.0 ghcr.io/you/my-agent:0.1.0</code><button type="button" data-copy="c4">Copy</button></div>
+            <p style="color:var(--muted);font-size:0.9rem">
+              Or <code style="font-size:0.85em">nexus build --seal -o my-agent.nx</code> to carry the
+              whole thing, weights included, to a machine with no network.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="foot-row">
+      <span class="brand-mark">nexusrun</span>
+      <span>Apache 2.0</span>
+      <span>Linux · macOS · Windows · FreeBSD</span>
+      <span>amd64 · arm64 · armv7</span>
+      <span style="margin-left:auto;color:var(--dim)">Runs on a Raspberry Pi. Deliberately.</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  document.querySelectorAll("button[data-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var el = document.getElementById(btn.getAttribute("data-copy"));
+      if (!el) return;
+      var text = el.textContent;
+      var done = function () {
+        var prev = btn.textContent;
+        btn.textContent = "Copied";
+        btn.setAttribute("data-done", "1");
+        setTimeout(function () {
+          btn.textContent = prev;
+          btn.removeAttribute("data-done");
+        }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); } catch (e) {}
+        document.body.removeChild(ta);
+        done();
+      }
+    });
+  });
+</script>
+
+</body>
+</html>
