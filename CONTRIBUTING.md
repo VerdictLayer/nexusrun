@@ -6,7 +6,7 @@ You need Go 1.26+ and, to actually run models, either `llama-cli` on your PATH
 or Ollama installed.
 
 ```bash
-git clone https://github.com/lanceseidman/nexusrun
+git clone https://github.com/verdictlayer/nexusrun
 cd nexusrun
 make build        # → bin/nexus
 make test

@@ -1,4 +1,4 @@
-module github.com/lanceseidman/nexusrun
+module github.com/verdictlayer/nexusrun
 
 go 1.26.5
 

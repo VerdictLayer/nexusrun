@@ -162,7 +162,7 @@ Details and limits in **[docs/SANDBOXING.md](docs/SANDBOXING.md)**.
 Download a binary from releases, or build from source:
 
 ```bash
-git clone https://github.com/lanceseidman/nexusrun
+git clone https://github.com/verdictlayer/nexusrun
 cd nexusrun
 ./scripts/build.sh          # cross-compiles all platforms into dist/
 go build -o nexus ./cmd/nexus   # or just build for this machine

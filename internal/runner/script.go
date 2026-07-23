@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lanceseidman/nexusrun/internal/manifest"
-	"github.com/lanceseidman/nexusrun/internal/sandbox"
+	"github.com/verdictlayer/nexusrun/internal/manifest"
+	"github.com/verdictlayer/nexusrun/internal/sandbox"
 )
 
 // Options configures a script run.

@@ -27,8 +27,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
 
-	"github.com/lanceseidman/nexusrun/internal/manifest"
-	"github.com/lanceseidman/nexusrun/internal/store"
+	"github.com/verdictlayer/nexusrun/internal/manifest"
+	"github.com/verdictlayer/nexusrun/internal/store"
 )
 
 // OCI media types for the NexusRun artifact format.

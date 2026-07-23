@@ -187,14 +187,37 @@
     color: var(--dim);
   }
 
-  .hero-grid {
+  /* Grid and flex children default to min-width:auto, so one nowrap line
+     (a git-clone command, a wide table) can blow out its track and push
+     the whole page sideways. Every layout track here may shrink; the
+     wide thing scrolls inside its own container instead. */
+  .stack > *, .stack-l > *, .stack-s > *,
+  .hero-head > *, .hero-sub > *,
+  .doctor-col, .doctor-grid > *,
+  .row > *, .ledger > *, .table-wrap { min-width: 0; }
+
+  .hero-head { display: flex; flex-direction: column; gap: clamp(1.75rem, 4vw, 2.5rem); }
+
+  .hero-sub {
     display: grid;
-    gap: clamp(2rem, 5vw, 3.5rem);
+    gap: clamp(1.5rem, 4vw, 3rem);
     grid-template-columns: 1fr;
     align-items: start;
   }
-  @media (min-width: 900px) {
-    .hero-grid { grid-template-columns: 1fr 1fr; }
+  @media (min-width: 880px) {
+    /* The build command needs more room than the lede to avoid clipping. */
+    .hero-sub { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); }
+  }
+
+  .doctor-band { padding-top: clamp(2rem, 4vw, 2.75rem); }
+
+  .doctor-grid {
+    display: grid;
+    gap: 1.75rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 800px) {
+    .doctor-grid { grid-template-columns: 1fr 1fr; gap: 2.5rem; }
   }
 
   .accent-line { color: var(--accent); }
@@ -216,14 +239,20 @@
     border-radius: 3px;
     overflow: hidden;
     font-family: var(--mono);
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     max-width: 100%;
+    min-width: 0;
   }
   .copy code {
+    /* min-width:0 lets this scroll inside the box instead of widening
+       the whole grid track. */
+    min-width: 0;
+    flex: 1 1 auto;
     padding: 0.7rem 0.9rem;
     white-space: nowrap;
     overflow-x: auto;
     color: var(--ink);
+    scrollbar-width: thin;
   }
   .copy code::before { content: "$ "; color: var(--dim); }
   .copy button {
@@ -264,10 +293,12 @@
   .readout {
     font-family: var(--mono);
     font-size: 0.78rem;
-    line-height: 1.85;
-    white-space: pre;
+    line-height: 1.7;
     color: var(--muted);
     margin: 0;
+    max-width: none;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--rule);
   }
   .readout .k { color: var(--ink); }
 
@@ -304,20 +335,28 @@
   .rows { display: flex; flex-direction: column; }
   .row {
     display: grid;
-    grid-template-columns: minmax(120px, auto) 1fr auto;
-    gap: 0.5rem 1rem;
-    align-items: center;
-    padding: 0.55rem 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.15rem 0.75rem;
+    align-items: baseline;
+    padding: 0.6rem 0;
     border-bottom: 1px dashed var(--rule);
     font-family: var(--mono);
-    font-size: 0.78rem;
+    font-size: 0.8rem;
   }
   .row:last-child { border-bottom: 0; }
-  .row-name { color: var(--ink); display: flex; align-items: center; }
-  .row-note { color: var(--muted); font-size: 0.74rem; }
-  @media (max-width: 620px) {
-    .row { grid-template-columns: 1fr auto; }
-    .row-note { grid-column: 1 / -1; }
+  .row-name {
+    color: var(--ink);
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+  }
+  .row-note {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 0.74rem;
+    line-height: 1.5;
+    padding-left: 1.15rem;
+    text-wrap: pretty;
   }
 
   /* ---------- feature cards ---------- */
@@ -422,8 +461,9 @@
 
   /* ---------- steps ---------- */
 
-  .steps { display: flex; flex-direction: column; gap: 1.5rem; counter-reset: step; }
-  .step { display: grid; grid-template-columns: auto 1fr; gap: 1rem; align-items: start; }
+  .steps { display: flex; flex-direction: column; gap: 1.75rem; counter-reset: step; }
+  .step { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .step > *, .step .stack-s > *, .card > * { min-width: 0; }
   .step-n {
     counter-increment: step;
     font-family: var(--mono);
@@ -461,80 +501,90 @@
       <span class="brand-tag">portable ai units</span>
     </div>
 
-    <div class="hero-grid">
-      <div class="stack-l">
-        <div class="stack">
-          <h1>Package an agent once.<br><span class="accent-line">Run it on whatever<br>hardware you land on.</span></h1>
-          <p class="lede">
-            NexusRun bundles a model, its prompts, its config and its hardware
-            preferences into a standard OCI artifact — then runs it on the fastest
-            accelerator the host can <em>actually</em> use. No container runtime,
-            no Python environment, no daemon. One static binary, about 3&nbsp;MB.
-          </p>
-        </div>
+    <div class="hero-head">
+      <h1>Package an agent once.<br><span class="accent-line">Run it on whatever<br>hardware you land on.</span></h1>
 
-        <div class="stack">
+      <div class="hero-sub">
+        <p class="lede">
+          NexusRun bundles a model, its prompts, its config and its hardware
+          preferences into a standard OCI artifact — then runs it on the fastest
+          accelerator the host can <em>actually</em> use. No container runtime,
+          no Python environment, no daemon. One static binary, about 3&nbsp;MB.
+        </p>
+        <div class="stack-s">
           <span class="label">Build it</span>
           <div class="copy">
-            <code id="cmd-install">git clone https://github.com/lanceseidman/nexusrun &amp;&amp; cd nexusrun &amp;&amp; make build</code>
+            <code id="cmd-install">git clone https://github.com/verdictlayer/nexusrun</code>
             <button type="button" data-copy="cmd-install">Copy</button>
           </div>
-          <p style="font-size:0.82rem;color:var(--dim)">
-            Needs Go 1.26+. Cross-compiles to 8 targets — Linux, macOS, Windows and
-            FreeBSD — as static, CGO-free binaries with no runtime dependencies.
-            To actually run models you'll also want llama.cpp or Ollama.
+          <p style="font-size:0.8rem;color:var(--dim)">
+            Then <code style="font-size:0.95em;color:var(--muted)">make build</code>. Needs Go 1.26+.
+            Produces static, CGO-free binaries for 8 targets across Linux, macOS,
+            Windows and FreeBSD.
           </p>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <span class="label">nexus doctor</span>
-          <span class="pill pill-warn">1 device unusable</span>
-        </div>
-        <div class="panel-body stack">
-          <div>
-            <span class="label">Detected hardware</span>
-            <div class="rows">
-              <div class="row">
-                <span class="row-name"><span class="lamp lamp-ok"></span>GPU</span>
-                <span class="row-note">nvidia Quadro RTX 5000 · 16 GB</span>
-                <span class="pill pill-ok">present</span>
-              </div>
-              <div class="row">
-                <span class="row-name"><span class="lamp lamp-ok"></span>CPU</span>
-                <span class="row-note">Intel Xeon W-10885M · 16 cores · avx2</span>
-                <span class="pill pill-ok">present</span>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <span class="label">Backend capability</span>
-            <div class="rows">
-              <div class="row">
-                <span class="row-name"><span class="lamp lamp-ok"></span>llama.cpp</span>
-                <span class="row-note">CPU-only build — no GPU backend compiled in</span>
-                <span class="pill pill-ok">ready</span>
-              </div>
-              <div class="row">
-                <span class="row-name"><span class="lamp lamp-ok"></span>llama.cpp/server</span>
-                <span class="row-note">keeps models warm between runs</span>
-                <span class="pill pill-ok">ready</span>
-              </div>
-              <div class="row">
-                <span class="row-name"><span class="lamp lamp-off"></span>onnxruntime</span>
-                <span class="row-note">shared library not found — needed for NPU</span>
-                <span class="pill pill-off">off</span>
-              </div>
-            </div>
-          </div>
-
-          <p class="readout"><span class="k">Usable devices:</span> GPU, CPU</p>
         </div>
       </div>
     </div>
   </header>
+
+  <section class="doctor-band">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="label">nexus doctor</span>
+        <span class="pill pill-warn">llama.cpp cannot reach the GPU</span>
+      </div>
+      <div class="panel-body stack">
+        <div class="doctor-grid">
+          <div class="doctor-col stack-s">
+            <span class="label">Detected hardware</span>
+            <div class="rows">
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>GPU</span>
+                <span class="pill pill-ok">present</span>
+                <span class="row-note">nvidia Quadro RTX 5000 · 16 GB</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>CPU</span>
+                <span class="pill pill-ok">present</span>
+                <span class="row-note">Intel Xeon W-10885M · 16 cores · avx2</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="doctor-col stack-s">
+            <span class="label">Backend capability</span>
+            <div class="rows">
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>llama.cpp</span>
+                <span class="pill pill-ok">ready</span>
+                <span class="row-note">CPU-only build — no GPU backend compiled in</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>llama.cpp/server</span>
+                <span class="pill pill-ok">ready</span>
+                <span class="row-note">keeps models warm between runs</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-ok"></span>ollama</span>
+                <span class="pill pill-ok">ready</span>
+                <span class="row-note">server reachable — places models on its own devices</span>
+              </div>
+              <div class="row">
+                <span class="row-name"><span class="lamp lamp-off"></span>onnxruntime</span>
+                <span class="pill pill-off">off</span>
+                <span class="row-note">shared library not found — needed for NPU execution</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="readout">
+          <span class="k">Usable devices:</span> GPU, CPU
+          <span style="color:var(--dim)">— and the GPU only through Ollama. Run a unit on llama.cpp and it goes to the CPU, because that build has no CUDA in it. Two backends, two different answers, reported separately instead of averaged into one optimistic number.</span>
+        </p>
+      </div>
+    </div>
+  </section>
 
   <section>
     <div class="stack-l">

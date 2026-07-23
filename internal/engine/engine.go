@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lanceseidman/nexusrun/internal/hardware"
+	"github.com/verdictlayer/nexusrun/internal/hardware"
 )
 
 // Request is a single generation call.

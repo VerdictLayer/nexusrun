@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lanceseidman/nexusrun/internal/engine"
-	"github.com/lanceseidman/nexusrun/internal/hardware"
+	"github.com/verdictlayer/nexusrun/internal/engine"
+	"github.com/verdictlayer/nexusrun/internal/hardware"
 )
 
 // Options configures a benchmark sweep.

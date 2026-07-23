@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/lanceseidman/nexusrun/internal/sandbox"
+	"github.com/verdictlayer/nexusrun/internal/sandbox"
 )
 
 // RunHelper applies the sandbox policy to the current process and then

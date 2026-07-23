@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lanceseidman/nexusrun/internal/hardware"
+	"github.com/verdictlayer/nexusrun/internal/hardware"
 )
 
 // LlamaServer drives llama.cpp's HTTP server instead of its one-shot CLI.

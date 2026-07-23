@@ -15,7 +15,7 @@ You need **Go 1.26+**. Nothing else is required to build — there are no
 codegen steps, no C toolchain, no Node.
 
 ```bash
-git clone https://github.com/lanceseidman/nexusrun
+git clone https://github.com/verdictlayer/nexusrun
 cd nexusrun
 make build        # → bin/nexus
 make test

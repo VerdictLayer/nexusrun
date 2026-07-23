@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lanceseidman/nexusrun/internal/hardware"
+	"github.com/verdictlayer/nexusrun/internal/hardware"
 )
 
 // stubBackend exercises accelerator scheduling on a machine that has no

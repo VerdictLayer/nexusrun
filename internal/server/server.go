@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lanceseidman/nexusrun/internal/daemon"
-	"github.com/lanceseidman/nexusrun/internal/engine"
-	"github.com/lanceseidman/nexusrun/internal/hardware"
-	"github.com/lanceseidman/nexusrun/internal/store"
-	"github.com/lanceseidman/nexusrun/internal/unit"
+	"github.com/verdictlayer/nexusrun/internal/daemon"
+	"github.com/verdictlayer/nexusrun/internal/engine"
+	"github.com/verdictlayer/nexusrun/internal/hardware"
+	"github.com/verdictlayer/nexusrun/internal/store"
+	"github.com/verdictlayer/nexusrun/internal/unit"
 )
 
 //go:embed console.html

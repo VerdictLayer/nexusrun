@@ -16,17 +16,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lanceseidman/nexusrun/internal/bench"
-	"github.com/lanceseidman/nexusrun/internal/compose"
-	"github.com/lanceseidman/nexusrun/internal/daemon"
-	"github.com/lanceseidman/nexusrun/internal/engine"
-	"github.com/lanceseidman/nexusrun/internal/hardware"
-	"github.com/lanceseidman/nexusrun/internal/manifest"
-	"github.com/lanceseidman/nexusrun/internal/runner"
-	"github.com/lanceseidman/nexusrun/internal/sandbox"
-	"github.com/lanceseidman/nexusrun/internal/server"
-	"github.com/lanceseidman/nexusrun/internal/store"
-	"github.com/lanceseidman/nexusrun/internal/unit"
+	"github.com/verdictlayer/nexusrun/internal/bench"
+	"github.com/verdictlayer/nexusrun/internal/compose"
+	"github.com/verdictlayer/nexusrun/internal/daemon"
+	"github.com/verdictlayer/nexusrun/internal/engine"
+	"github.com/verdictlayer/nexusrun/internal/hardware"
+	"github.com/verdictlayer/nexusrun/internal/manifest"
+	"github.com/verdictlayer/nexusrun/internal/runner"
+	"github.com/verdictlayer/nexusrun/internal/sandbox"
+	"github.com/verdictlayer/nexusrun/internal/server"
+	"github.com/verdictlayer/nexusrun/internal/store"
+	"github.com/verdictlayer/nexusrun/internal/unit"
 )
 
 func logf(format string, args ...any) {
