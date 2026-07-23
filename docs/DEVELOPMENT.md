@@ -362,11 +362,20 @@ Targets: linux amd64/arm64/arm (GOARM=7, for 32-bit Raspberry Pi OS),
 darwin amd64/arm64, windows amd64/arm64 (Snapdragon X / Copilot+), and
 freebsd amd64.
 
-CI (`.github/workflows/ci.yml`) runs vet, test, and build on
-ubuntu/macos/windows, plus a full cross-compile that uploads `dist/` as
-an artifact. **If the cross-compile job fails after your change, the
-usual cause is a new dependency that pulls in cgo or is platform-specific
-— fix it with build tags rather than dropping a target.**
+CI configuration is maintained outside this repository, so the
+pre-release gate is local and every one of these must pass:
+
+```bash
+gofmt -l ./cmd ./internal   # must print nothing
+go vet ./...
+go test ./...
+make dist                   # all eight targets must cross-compile
+```
+
+**If `make dist` fails after your change, the usual cause is a new
+dependency that pulls in cgo or is platform-specific — fix it with build
+tags rather than dropping a target.** The static CGO-free binary is what
+makes this run on edge hardware at all.
 
 ---
 

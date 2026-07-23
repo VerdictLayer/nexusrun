@@ -276,10 +276,16 @@ Working and verified end-to-end on Linux:
 - Ollama model reuse — runs weights Ollama already downloaded, no copy
 - Hardware detection and backend capability probing
 - CPU execution via llama.cpp, with the model's chat template applied
-- **Warm-model daemon** — `nexus serve` keeps weights resident; measured 11.8s
-  cold to 2.5s warm on a repeat run of the same unit
-- **Sandboxed script units** — Landlock-enforced, capability-gated (see
-  [docs/SANDBOXING.md](docs/SANDBOXING.md))
+- **Warm-model daemon** — `nexus serve` keeps weights resident; measured 5.3s
+  cold to 2.4s warm on a repeat run of a 2.2 GB unit. `llama-server` is
+  discovered next to `llama-cli`, so a normal llama.cpp build needs no config
+- **Air-gapped execution** — a `--seal`ed unit exported, imported into an empty
+  store, and generated correctly with no Ollama models directory, no reachable
+  Ollama server, and a throwaway `HOME`
+- **Sandboxed script units** — Landlock-enforced, capability-gated. Verified
+  from inside the sandbox: writes outside the unit directory, reads of the user
+  home, and outbound TCP are all denied by the kernel, while shell and Python
+  units run normally (see [docs/SANDBOXING.md](docs/SANDBOXING.md))
 - **Pipeline composition** — `nexus compose a b c`
 - Benchmarking, run logging, web console
 
