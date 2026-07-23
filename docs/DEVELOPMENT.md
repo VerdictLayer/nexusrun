@@ -17,7 +17,7 @@ codegen steps, no C toolchain, no Node.
 ```bash
 git clone https://github.com/verdictlayer/nexusrun
 cd nexusrun
-make build        # → bin/nexus
+make build        # → bin/nexus (version-stamped)
 make test
 make vet
 ```

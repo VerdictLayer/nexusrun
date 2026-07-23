@@ -5,3 +5,6 @@
 # Local tooling and CI config stay out of the published repo.
 /.claude/
 /.github/
+
+# The marketing site lives in its own private repo (nexusrun-site).
+/web/
