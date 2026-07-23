@@ -1,0 +1,7 @@
+/bin/
+/dist/
+*.nx
+
+# Local tooling and CI config stay out of the published repo.
+/.claude/
+/.github/

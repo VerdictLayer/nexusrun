@@ -1,0 +1,28 @@
+apiVersion: nexusrun.dev/v1
+name: code-reviewer
+version: 0.1.0
+description: Reviews a code snippet for bugs and unclear naming, fully offline
+author: NexusRun examples
+license: Apache-2.0
+
+models:
+  - id: main
+    # An instruction-tuned model: chat units apply the model's chat
+    # template, and base (non-instruct) models ignore system prompts.
+    # Reuses Ollama's copy if you have it; otherwise: ollama pull phi3
+    source: ollama:phi3:latest
+    context: 4096
+    temperature: 0.2
+
+entrypoint:
+  type: chat
+  system_prompt: |
+    You are a concise code reviewer. Given a snippet, report only:
+      1. Bugs that would actually fire at runtime, with the triggering input.
+      2. Names that mislead about what the code does.
+    Skip style opinions. If the code is fine, say so in one line.
+
+hardware:
+  # Small models are memory-bandwidth-bound; on many laptops the CPU wins.
+  # Run `nexus bench` to find out for your machine rather than assuming.
+  prefer: [gpu, cpu]

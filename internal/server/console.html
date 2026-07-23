@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NexusRun Console</title>
+<style>
+  :root {
+    --bg: #fbfbfd; --panel: #fff; --text: #14161a; --muted: #666e7a;
+    --line: #e3e6ea; --accent: #2f6df6; --ok: #17864a; --warn: #b06000;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1013; --panel: #16191e; --text: #e7eaee; --muted: #9aa3ae;
+      --line: #262b33; --accent: #6f9bff; --ok: #4ec27f; --warn: #e0a250;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 22px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 24px 28px; max-width: 1100px; }
+  section { margin-bottom: 34px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden;
+  }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted);
+    padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: var(--mono); font-size: 13px; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    border: 1px solid var(--line);
+  }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .pill.off { color: var(--muted); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .muted { color: var(--muted); }
+  .empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 14px; }
+  .empty code {
+    display: inline-block; margin-top: 8px; padding: 5px 9px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>NexusRun Console</h1>
+  <span class="sub" id="host">loading…</span>
+</header>
+
+<main>
+  <section>
+    <h2>Hardware &amp; backend capability</h2>
+    <div class="panel scroll"><table id="hw"><tbody></tbody></table></div>
+    <p class="sub" style="margin-top:10px">
+      Detected hardware is what the machine has. Backend capability is what the
+      installed runtimes can actually execute on — the two often differ.
+    </p>
+  </section>
+
+  <section>
+    <h2>Units</h2>
+    <div class="panel scroll" id="units-wrap"><table id="units"><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Recent runs</h2>
+    <div class="panel scroll" id="runs-wrap"><table id="runs"><tbody></tbody></table></div>
+  </section>
+</main>
+
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+const size = n => {
+  if (!n) return "—";
+  const u = ["B","KB","MB","GB","TB"];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + " " + u[i];
+};
+
+async function load() {
+  const [hw, units, runs] = await Promise.all([
+    fetch("/api/hardware").then(r => r.json()),
+    fetch("/api/units").then(r => r.json()),
+    fetch("/api/runs").then(r => r.json()),
+  ]);
+
+  const h = hw.hardware;
+  document.getElementById("host").textContent =
+    `${h.os}/${h.arch} · ${h.cpu_model} · ${h.cpu_cores} cores · ${(h.total_ram_mb/1024).toFixed(1)} GB RAM`;
+
+  const usable = new Set(hw.usable || []);
+  let rows = `<tr><th>Device</th><th>Name</th><th>Backend target</th><th>Status</th></tr>`;
+  for (const d of h.devices) {
+    const ok = usable.has(d.class);
+    rows += `<tr>
+      <td><span class="pill ${ok ? "ok" : "warn"}">${esc(d.class.toUpperCase())}</span></td>
+      <td>${esc(d.vendor)} ${esc(d.name)}${d.memory_mb ? ` <span class="muted">(${size(d.memory_mb*1024*1024)})</span>` : ""}</td>
+      <td class="mono muted">${esc(d.backend || "—")}</td>
+      <td>${ok ? '<span class="muted">usable</span>'
+                : '<span class="warn">detected, no backend can drive it</span>'}</td>
+    </tr>`;
+  }
+  for (const b of hw.backends) {
+    rows += `<tr>
+      <td><span class="pill ${b.available ? "ok" : "off"}">${b.available ? "READY" : "OFF"}</span></td>
+      <td class="mono">${esc(b.backend)}${b.version ? ` <span class="muted">${esc(b.version)}</span>` : ""}</td>
+      <td class="mono muted">${esc((b.devices||[]).join(", ") || "—")}</td>
+      <td class="muted">${esc(b.detail)}</td>
+    </tr>`;
+  }
+  document.querySelector("#hw tbody").innerHTML = rows;
+
+  if (!units.length) {
+    document.getElementById("units-wrap").innerHTML =
+      `<div class="empty">No units built yet.<br><code>nexus init my-agent &amp;&amp; nexus build my-agent</code></div>`;
+  } else {
+    let u = `<tr><th>Unit</th><th>Packaging</th><th>Size</th><th>Models</th><th>Device preference</th></tr>`;
+    for (const x of units) {
+      u += `<tr>
+        <td class="mono">${esc(x.ref)}${x.description ? `<br><span class="muted" style="font-family:system-ui">${esc(x.description)}</span>` : ""}</td>
+        <td><span class="pill ${x.sealed ? "ok" : "off"}">${x.sealed ? "SEALED" : "LINKED"}</span></td>
+        <td>${size(x.size)}</td>
+        <td>${x.models}</td>
+        <td class="mono muted">${esc(x.prefer)}</td>
+      </tr>`;
+    }
+    document.querySelector("#units tbody").innerHTML = u;
+  }
+
+  if (!runs.length) {
+    document.getElementById("runs-wrap").innerHTML =
+      `<div class="empty">No runs recorded yet.<br><code>nexus run my-agent:0.1.0 -p "hello"</code></div>`;
+  } else {
+    let r = `<tr><th>Run</th><th>Unit</th><th>Device</th><th>Backend</th><th>tok/s</th><th>Output</th></tr>`;
+    for (const x of runs) {
+      r += `<tr>
+        <td class="mono">${esc(x.id)}</td>
+        <td class="mono">${esc(x.unit)}</td>
+        <td><span class="pill ${x.error ? "warn" : "ok"}">${esc((x.device||"").toUpperCase())}</span></td>
+        <td class="mono muted">${esc(x.backend)}</td>
+        <td>${x.tokens_per_sec ? x.tokens_per_sec.toFixed(1) : "—"}</td>
+        <td>${x.error ? `<span class="warn">${esc(x.error.split("\n")[0])}</span>`
+                      : `<a href="/api/runs/${encodeURIComponent(x.id)}" target="_blank">view</a>`}</td>
+      </tr>`;
+    }
+    document.querySelector("#runs tbody").innerHTML = r;
+  }
+}
+
+load().catch(e => {
+  document.getElementById("host").textContent = "failed to load: " + e.message;
+});
+setInterval(() => load().catch(() => {}), 5000);
+</script>
+</body>
+</html>
