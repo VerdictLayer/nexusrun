@@ -142,6 +142,11 @@ design.**
 
 `nexus.yaml`, API version `nexusrun.dev/v1`.
 
+The `nexusrun.dev` prefix is the project's own domain, used as a namespace
+the way Kubernetes and OCI do. It is not fetched at runtime — nothing here
+touches the network to validate a manifest — it just guarantees the schema
+name cannot collide with anyone else's.
+
 ```yaml
 apiVersion: nexusrun.dev/v1        # required, must match exactly
 name: research-agent               # required, lowercase alphanumeric + hyphens

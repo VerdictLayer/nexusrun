@@ -2,6 +2,8 @@
 
 **Portable AI units — build once, run on whatever hardware you land on.**
 
+[nexusrun.dev](https://nexusrun.dev) · [Quickstart](docs/QUICKSTART.md) · [Reference](docs/REFERENCE.md)
+
 NexusRun packages an AI agent (its model, prompts, tools, and config) into a
 standard **OCI artifact**, then runs it on the fastest accelerator the host can
 actually use. No containers, no Python environment, no daemon. One static
