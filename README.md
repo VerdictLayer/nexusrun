@@ -258,6 +258,7 @@ fast inner loop while developing.
 
 | Document | What's in it |
 |---|---|
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | **Start here.** Three steps to build your own agent, three to run someone else's |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, repo map, how to add a backend or model source, testing |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Every command and flag, the manifest schema, env vars, on-disk and OCI layout |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the system is shaped this way — the design decisions and their trade-offs |

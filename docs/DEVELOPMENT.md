@@ -2,6 +2,10 @@
 
 How to build NexusRun, find your way around the code, and extend it.
 
+New to the tool itself? Run through [QUICKSTART.md](QUICKSTART.md) first —
+it takes a few minutes and everything below assumes you have built and run
+a unit at least once.
+
 For *why* the system is shaped the way it is, read
 [ARCHITECTURE.md](ARCHITECTURE.md) first — this document assumes those
 decisions and tells you how to work inside them. For the complete CLI,

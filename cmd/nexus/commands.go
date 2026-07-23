@@ -45,7 +45,7 @@ models:
   - id: main
     # Reuses a model already pulled by Ollama — no second download.
     # Other sources: hf:<org>/<repo>/<file>.gguf, https://…, ./local.gguf
-    source: ollama:%s
+    source: %s
     context: 4096
 
 entrypoint:
@@ -57,6 +57,26 @@ hardware:
   # Try the NPU first, then GPU, then CPU.
   prefer: [npu, gpu, cpu]
 `
+
+// scaffoldModelSource turns a --model value into a manifest source.
+//
+// A bare name like "llama3.1:8b" means an Ollama model, but anything that
+// already carries a scheme or looks like a path must be passed through
+// untouched. The scaffold comment advertises hf:, https:// and local
+// files, so unconditionally prefixing produced sources like
+// "ollama:hf:org/repo/file.gguf" that could never resolve.
+func scaffoldModelSource(v string) string {
+	for _, scheme := range []string{"ollama:", "hf:", "http://", "https://"} {
+		if strings.HasPrefix(v, scheme) {
+			return v
+		}
+	}
+	if strings.HasPrefix(v, ".") || strings.HasPrefix(v, "/") ||
+		strings.Contains(v, `\`) || strings.HasSuffix(v, ".gguf") {
+		return v
+	}
+	return "ollama:" + v
+}
 
 func newInitCmd() *cobra.Command {
 	var model string
@@ -78,7 +98,7 @@ func newInitCmd() *cobra.Command {
 			if _, err := os.Stat(path); err == nil {
 				return fmt.Errorf("%s already exists", path)
 			}
-			body := fmt.Sprintf(scaffoldManifest, name, model)
+			body := fmt.Sprintf(scaffoldManifest, name, scaffoldModelSource(model))
 			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 				return err
 			}
