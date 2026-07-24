@@ -185,13 +185,19 @@ field will not parse on older `nexus` binaries.
 | Scheme | Behaviour |
 |---|---|
 | `ollama:<name>[:<tag>]` | Reuse weights Ollama already pulled — no copy, no re-download |
-| `hf:<org>/<repo>/<file>` | Hugging Face resolve endpoint, cached by digest |
+| `hf:<org>/<repo>/<file>` | Hugging Face, revision `main`. `<file>` may contain slashes |
+| `hf:<org>/<repo>@<rev>/<file>` | Hugging Face at a pinned revision, branch, or tag |
 | `https://…` | Direct download into the content-addressed store |
 | `./path` or `/path` | Local file, used in place |
 
 Downloads are verified against `sha256` when the manifest pins one, and
 deduplicated by digest — the same model shared by ten units costs one
-copy on disk.
+copy on disk. Even without a pin, a downloaded source (`hf:` or `https:`) is
+remembered by digest, so it is fetched once and reused on later runs rather
+than re-downloaded.
+
+Gated or private Hugging Face repos are reachable by setting `HF_TOKEN`
+(or `HUGGING_FACE_HUB_TOKEN`) in the environment.
 
 ### Capabilities
 
@@ -230,6 +236,7 @@ usable, the first available backend's most capable device is used — and
 | `NEXUSRUN_REGISTRY_INSECURE` | unset | Set to exactly `1` to allow plain HTTP to a non-local registry |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama server to use |
 | `OLLAMA_MODELS` | *(standard dirs)* | Ollama model directory to borrow from |
+| `HF_TOKEN` | — | Hugging Face token for gated/private repos (also `HUGGING_FACE_HUB_TOKEN`) |
 
 `llama-cli` is otherwise looked up on `PATH` as `llama-cli` or `llama`,
 then in `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin`.

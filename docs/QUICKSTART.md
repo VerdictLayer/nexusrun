@@ -69,8 +69,9 @@ hardware:
 Edit `system_prompt` to whatever you want the agent to be. That's the part
 that makes it yours.
 
-`--model` accepts more than Ollama names: `hf:<org>/<repo>/<file>.gguf`, an
-`https://` URL, or a path to a local `.gguf`.
+`--model` accepts more than Ollama names: `hf:<org>/<repo>/<file>.gguf`
+(add `@<revision>` to pin a branch or tag), an `https://` URL, or a path to a
+local `.gguf`. For gated Hugging Face repos, set `HF_TOKEN`.
 
 ### 2. Run it straight from the folder
 

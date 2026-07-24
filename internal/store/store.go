@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -67,24 +68,27 @@ type Progress func(done, total int64)
 // Resolve turns a manifest model source into a local file path,
 // downloading it if necessary. Supported schemes:
 //
-//	ollama:<name>[:<tag>]        reuse a model already pulled by Ollama (no copy)
-//	hf:<org>/<repo>/<file>       Hugging Face resolve endpoint
-//	https://…                    direct download
-//	./path or /path              local file, used in place
+//	ollama:<name>[:<tag>]              reuse a model already pulled by Ollama (no copy)
+//	hf:<org>/<repo>/<file>             Hugging Face, revision "main"
+//	hf:<org>/<repo>@<revision>/<file>  Hugging Face, pinned revision or branch
+//	https://…                          direct download
+//	./path or /path                    local file, used in place
+//
+// The <file> segment may contain slashes (models with files in subfolders).
+// Gated or private Hugging Face repos are reachable by setting HF_TOKEN (or
+// HUGGING_FACE_HUB_TOKEN) in the environment.
 func (s *Store) Resolve(source, wantDigest string, p Progress) (*ResolvedModel, error) {
 	switch {
 	case strings.HasPrefix(source, "ollama:"):
 		return resolveOllama(strings.TrimPrefix(source, "ollama:"))
 	case strings.HasPrefix(source, "hf:"):
-		spec := strings.TrimPrefix(source, "hf:")
-		parts := strings.SplitN(spec, "/", 3)
-		if len(parts) != 3 {
-			return nil, fmt.Errorf("hf source must be hf:<org>/<repo>/<file>, got %q", source)
+		url, err := hfResolveURL(strings.TrimPrefix(source, "hf:"))
+		if err != nil {
+			return nil, err
 		}
-		url := fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s?download=true", parts[0], parts[1], parts[2])
-		return s.download(url, wantDigest, source, p)
+		return s.download(url, wantDigest, source, p, hfHeaders())
 	case strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
-		return s.download(source, wantDigest, source, p)
+		return s.download(source, wantDigest, source, p, nil)
 	default:
 		abs, err := filepath.Abs(source)
 		if err != nil {
@@ -98,22 +102,91 @@ func (s *Store) Resolve(source, wantDigest string, p Progress) (*ResolvedModel, 
 	}
 }
 
+// hfResolveURL builds a Hugging Face resolve URL from an hf: source spec
+// (everything after the "hf:" prefix). The spec is
+//
+//	<org>/<repo>[@<revision>]/<file...>
+//
+// The revision defaults to "main". The file segment keeps any slashes, so
+// weights stored in a subfolder resolve correctly. The revision segment is
+// mandatory in Hugging Face's resolve URL — omitting it (as an earlier
+// version did) produces a 404.
+func hfResolveURL(spec string) (string, error) {
+	parts := strings.SplitN(spec, "/", 3)
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", fmt.Errorf("hf source must be hf:<org>/<repo>[@<rev>]/<file>, got %q", "hf:"+spec)
+	}
+	org, repoRev, file := parts[0], parts[1], parts[2]
+	repo, revision, hasRev := strings.Cut(repoRev, "@")
+	if !hasRev || revision == "" {
+		revision = "main"
+	}
+	// Path-escape each user segment so a repo or filename cannot inject extra
+	// path elements or query strings into the URL.
+	return fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s",
+		url.PathEscape(org), url.PathEscape(repo),
+		url.PathEscape(revision), hfEscapeFilePath(file)), nil
+}
+
+// hfEscapeFilePath escapes each path segment but keeps the slashes between
+// them, so "sub/dir/model.gguf" stays a path rather than one escaped blob.
+func hfEscapeFilePath(p string) string {
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return strings.Join(segs, "/")
+}
+
+// hfHeaders returns the request headers for a Hugging Face download: a
+// User-Agent (some CDNs reject an empty one) and a bearer token when the
+// environment supplies one, which is what unlocks gated and private repos.
+func hfHeaders() map[string]string {
+	h := map[string]string{"User-Agent": "nexusrun"}
+	for _, k := range []string{"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HUGGINGFACE_TOKEN"} {
+		if tok := os.Getenv(k); tok != "" {
+			h["Authorization"] = "Bearer " + tok
+			break
+		}
+	}
+	return h
+}
+
 // download fetches a URL into the content-addressed blob store. If the
 // digest is known up front and already present, it is a no-op.
-func (s *Store) download(url, wantDigest, source string, p Progress) (*ResolvedModel, error) {
+func (s *Store) download(rawURL, wantDigest, source string, p Progress, headers map[string]string) (*ResolvedModel, error) {
 	if wantDigest != "" {
 		if info, err := os.Stat(s.BlobPath(wantDigest)); err == nil {
 			return &ResolvedModel{Path: s.BlobPath(wantDigest), Digest: wantDigest, Size: info.Size(), Source: source}, nil
 		}
+	} else if d := s.cachedDigest(source); d != "" {
+		// An unpinned source (no sha256 in the manifest) is content-addressed
+		// only after the first fetch. Remembering source→digest is what stops
+		// a multi-gigabyte model from being re-downloaded on every run.
+		if info, err := os.Stat(s.BlobPath(d)); err == nil {
+			return &ResolvedModel{Path: s.BlobPath(d), Digest: d, Size: info.Size(), Source: source}, nil
+		}
 	}
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s: %s", url, resp.Status)
+		// Gated and private Hugging Face repos fail here without a token;
+		// say so rather than leaving the user to guess at a bare 401/403.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("download %s: %s — if this is a gated or private model, set HF_TOKEN", source, resp.Status)
+		}
+		return nil, fmt.Errorf("download %s: %s", source, resp.Status)
 	}
 
 	tmp, err := os.CreateTemp(s.BlobsDir(), ".download-*")
@@ -160,7 +233,48 @@ func (s *Store) download(url, wantDigest, source string, p Progress) (*ResolvedM
 	if err := os.Rename(tmpName, final); err != nil {
 		return nil, err
 	}
+	// Remember source→digest so the next unpinned resolve reuses the blob
+	// instead of downloading it again. Best-effort: a cache write failure
+	// only costs a redundant future download, never correctness.
+	if wantDigest == "" {
+		s.recordDownload(source, digest)
+	}
 	return &ResolvedModel{Path: final, Digest: digest, Size: written, Source: source}, nil
+}
+
+// downloadsPath is the source→digest index for unpinned downloads.
+func (s *Store) downloadsPath() string { return filepath.Join(s.Root, "downloads.json") }
+
+func (s *Store) loadDownloads() map[string]string {
+	m := map[string]string{}
+	data, err := os.ReadFile(s.downloadsPath())
+	if err != nil {
+		return m
+	}
+	_ = json.Unmarshal(data, &m)
+	return m
+}
+
+// cachedDigest returns the digest previously recorded for a source, or "".
+func (s *Store) cachedDigest(source string) string {
+	return s.loadDownloads()[source]
+}
+
+// recordDownload maps a source to the digest it resolved to. Read-modify-write
+// of a small JSON file; races between concurrent CLI runs at worst drop an
+// entry (a redundant download later), never corrupt the blob store, which is
+// content-addressed and written by atomic rename.
+func (s *Store) recordDownload(source, digest string) {
+	m := s.loadDownloads()
+	m[source] = digest
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := s.downloadsPath() + ".tmp"
+	if os.WriteFile(tmp, data, 0o644) == nil {
+		_ = os.Rename(tmp, s.downloadsPath())
+	}
 }
 
 // --- Ollama interop -------------------------------------------------------

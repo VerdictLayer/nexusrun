@@ -60,8 +60,62 @@ func TestResolveRejectsMalformedHFSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an incomplete hf: source")
 	}
-	if !strings.Contains(err.Error(), "hf:<org>/<repo>/<file>") {
+	if !strings.Contains(err.Error(), "hf:<org>/<repo>") {
 		t.Errorf("error must show the expected form, got: %v", err)
+	}
+}
+
+// The resolve URL must carry a revision segment; omitting it (as an earlier
+// version did) produced a 404 on every Hugging Face download.
+func TestHFResolveURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{
+			"unsloth/SmolLM2-135M-Instruct-GGUF/SmolLM2-135M-Instruct-Q2_K.gguf",
+			"https://huggingface.co/unsloth/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q2_K.gguf",
+		},
+		{
+			// Pinned revision or branch after the repo.
+			"Qwen/Qwen2.5-0.5B-Instruct-GGUF@v1.0/qwen2.5-0.5b-instruct-q4_0.gguf",
+			"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/v1.0/qwen2.5-0.5b-instruct-q4_0.gguf",
+		},
+		{
+			// A file kept in a subfolder keeps its slashes.
+			"org/repo/models/q4/model.gguf",
+			"https://huggingface.co/org/repo/resolve/main/models/q4/model.gguf",
+		},
+	}
+	for _, c := range cases {
+		got, err := hfResolveURL(c.in)
+		if err != nil {
+			t.Errorf("hfResolveURL(%q) errored: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("hfResolveURL(%q)\n  got  %s\n  want %s", c.in, got, c.want)
+		}
+	}
+}
+
+func TestHFResolveURLRejectsIncomplete(t *testing.T) {
+	for _, bad := range []string{"org", "org/repo", "org//file", "/repo/file", "org/repo/"} {
+		if _, err := hfResolveURL(bad); err == nil {
+			t.Errorf("expected error for incomplete spec %q", bad)
+		}
+	}
+}
+
+func TestHFHeadersToken(t *testing.T) {
+	// No token → User-Agent only, no Authorization.
+	t.Setenv("HF_TOKEN", "")
+	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
+	t.Setenv("HUGGINGFACE_TOKEN", "")
+	if _, ok := hfHeaders()["Authorization"]; ok {
+		t.Error("Authorization set with no token in the environment")
+	}
+	// Token present → bearer auth, so gated repos are reachable.
+	t.Setenv("HF_TOKEN", "hf_secret")
+	if got := hfHeaders()["Authorization"]; got != "Bearer hf_secret" {
+		t.Errorf("Authorization = %q, want Bearer hf_secret", got)
 	}
 }
 
