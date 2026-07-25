@@ -48,6 +48,56 @@ rather than blending them into one optimistic figure.
 `--all-devices` is what produces the comparison. Without it, eval runs
 where the unit would actually run.
 
+## Is a cheaper model good enough?
+
+`--model` is repeatable, and scores the same suite against each one. This is
+the question people actually have about a local agent — not "which model is
+best" in the abstract, but "how much model does *this job* need".
+
+```bash
+nexus eval code-reviewer:0.1.0 \
+  --model ollama:deepseek-coder:latest \
+  --model ollama:codeqwen:latest \
+  --model ollama:llama3.1:8b \
+  --model ollama:starcoder2:3b
+```
+
+Real output, same host, temperature 0, four cases:
+
+```
+  MODEL                          PARAMS  QUANT         SIZE     PASS    RATE     tok/s
+  ────────────────────────────────────────────────────────────────────────────────────
+  ollama:codeqwen:latest         7.3B    Q4_0        3.9 GB      4/4    100%       7.5
+  ollama:llama3.1:8b             8.0B    Q4_K_M      4.6 GB      4/4    100%       6.7
+  ollama:deepseek-coder:latest   1B      Q4_0        740 MB      3/4     75%      36.7
+  ollama:phi3:latest *           3.8B    Q4_0        2.0 GB      3/4     75%      13.3
+  ollama:starcoder2:3b           3B      Q4_0        1.6 GB      1/4     25%      16.5
+
+  * the unit's own model; the rest were supplied with --model
+```
+
+Three things worth taking from that table:
+
+**A 740 MB model scored what a 2.0 GB model scored, 2.8× faster.** For this
+agent, `phi3` is paying 2.7× the disk and 2.7× the latency for nothing. The
+unit's default was chosen by reputation; the suite chose better.
+
+**Size is not the axis — training is.** `starcoder2:3b` is more than twice the
+size of the 1B model and scored a third as well. It is a base model, never
+instruction-tuned, and a base model cannot follow a system prompt that says
+"report only bugs and misleading names". No parameter count fixes that, and
+no benchmark chart tells you so for *your* prompt.
+
+**Equal scores hide different failures.** The 1B model and `phi3` both scored
+75%, but not on the same cases: the small one found the nil-map write and then
+invented a problem in correct code, while `phi3` did the reverse. If you only
+have the percentage you will pick between them by coin flip. This is why the
+scorecard prints failing cases and not just a rate.
+
+Every row is a full, separately saved report, so any of them can be diffed
+later with `nexus eval diff`. Sizes are the weights layer only, which is why
+they read a little smaller than `ollama list`.
+
 ## Suites live in the unit
 
 A suite is a YAML file under `evals/` in the unit directory. Everything in

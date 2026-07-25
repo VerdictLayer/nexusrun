@@ -107,6 +107,7 @@ host. See **[EVAL.md](EVAL.md)** for the suite format and the reasoning.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--suite` | the unit's `evals/` | Suite file to run |
+| `--model` | the unit's own | Also score the suite against this model; repeatable. Each is recorded as an override so its score is never read as the unit's own |
 | `--device` | — | Restrict to one device: `npu`, `gpu`, `cpu` |
 | `--backend` | — | Restrict to one backend |
 | `--repeats` | `1` | Runs per case; above 1, cases that don't pass every run are reported flaky |

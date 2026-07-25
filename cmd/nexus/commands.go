@@ -616,6 +616,7 @@ func evalBackends() ([]engine.Backend, func()) {
 
 func newEvalCmd() *cobra.Command {
 	var suitePath, device, backendName, compare string
+	var extraModels []string
 	var repeats int
 	var allDevices, jsonOut, noSave bool
 	var failUnder float64
@@ -701,14 +702,47 @@ of trusting a published number.`,
 			}
 
 			mod := m.Models[0]
-			modelPath, ok := sealed[mod.ID]
-			modelDigest := ""
-			if !ok {
+
+			// The models to score the suite against. With no --model the
+			// unit's own is the only one; each extra is a what-if, recorded
+			// as an override so its score is never mistaken for the unit's.
+			type candidateModel struct {
+				source   string
+				digest   string
+				path     string
+				quant    string
+				params   string
+				size     int64
+				override bool
+			}
+			var models []candidateModel
+
+			own := candidateModel{source: mod.Source}
+			if p, ok := sealed[mod.ID]; ok {
+				own.path = p
+			} else {
 				resolved, rerr := s.Resolve(mod.Source, mod.SHA256, nil)
 				if rerr != nil {
 					return rerr
 				}
-				modelPath, modelDigest = resolved.Path, resolved.Digest
+				own.path, own.digest = resolved.Path, resolved.Digest
+				own.quant, own.params, own.size = resolved.Quant, resolved.Params, resolved.Size
+			}
+			models = append(models, own)
+
+			for _, src := range extraModels {
+				if src == mod.Source {
+					continue // already covered by the unit's own
+				}
+				resolved, rerr := s.Resolve(src, "", func(done, total int64) {})
+				if rerr != nil {
+					return fmt.Errorf("--model %s: %w", src, rerr)
+				}
+				models = append(models, candidateModel{
+					source: src, digest: resolved.Digest, path: resolved.Path,
+					quant: resolved.Quant, params: resolved.Params, size: resolved.Size,
+					override: true,
+				})
 			}
 
 			backends, cleanup := evalBackends()
@@ -737,27 +771,40 @@ of trusting a published number.`,
 				prefer, devices = []string{device}, []string{device}
 			}
 
-			rep, err := eval.Run(ctx, eval.Options{
-				Suite:       suite,
-				SuitePath:   suiteRecorded,
-				UnitRef:     m.Ref(),
-				UnitDigest:  unitDigest,
-				ModelPath:   modelPath,
-				ModelRef:    mod.Source,
-				ModelDigest: modelDigest,
-				System:      m.Entrypoint.SystemPrompt,
-				Context:     mod.Context,
-				Chat:        true,
-				Repeats:     repeats,
-				Devices:     devices,
-				AllDevices:  allDevices,
-				Prefer:      prefer,
-				Backends:    backends,
-				Progress:    logf,
-			})
-			if err != nil {
-				return err
+			// One report per model, each separately saved and citable.
+			var reports []*eval.Report
+			for i, cm := range models {
+				if len(models) > 1 {
+					logf("[%d/%d] scoring against %s", i+1, len(models), cm.source)
+				}
+				rep, rerr := eval.Run(ctx, eval.Options{
+					Suite:         suite,
+					SuitePath:     suiteRecorded,
+					UnitRef:       m.Ref(),
+					UnitDigest:    unitDigest,
+					ModelPath:     cm.path,
+					ModelRef:      cm.source,
+					ModelDigest:   cm.digest,
+					ModelQuant:    cm.quant,
+					ModelParams:   cm.params,
+					ModelSize:     cm.size,
+					ModelOverride: cm.override,
+					System:        m.Entrypoint.SystemPrompt,
+					Context:       mod.Context,
+					Chat:          true,
+					Repeats:       repeats,
+					Devices:       devices,
+					AllDevices:    allDevices,
+					Prefer:        prefer,
+					Backends:      backends,
+					Progress:      logf,
+				})
+				if rerr != nil {
+					return rerr
+				}
+				reports = append(reports, rep)
 			}
+			rep := reports[0]
 
 			// Compare before printing the scorecard so the delta is the
 			// last thing on screen — it is what the reader came for.
@@ -780,15 +827,23 @@ of trusting a published number.`,
 			}
 
 			if !noSave {
-				if err := eval.Save(s, rep); err != nil {
-					logf("warning: could not save evaluation: %v", err)
-				} else {
-					logf("saved as %s", rep.ID)
+				for _, r := range reports {
+					if err := eval.Save(s, r); err != nil {
+						logf("warning: could not save evaluation: %v", err)
+					} else {
+						logf("saved as %s", r.ID)
+					}
 				}
 			}
 
+			// One model prints the full scorecard; several print the
+			// comparison, since the point of a sweep is the ranking.
+			matrix := eval.NewMatrix(reports)
 			if jsonOut {
-				out := map[string]any{"report": rep}
+				out := map[string]any{"report": rep, "reports": reports}
+				if len(reports) > 1 {
+					out["matrix"] = matrix
+				}
 				if diff != nil {
 					out["diff"] = diff
 				}
@@ -797,6 +852,8 @@ of trusting a published number.`,
 				if err := enc.Encode(out); err != nil {
 					return err
 				}
+			} else if len(reports) > 1 {
+				fmt.Printf("\n%s", matrix.String())
 			} else {
 				fmt.Printf("\n%s", rep.String())
 				if diff != nil {
@@ -804,18 +861,31 @@ of trusting a published number.`,
 				}
 			}
 
-			// Exit status makes the suite usable as a gate in CI.
-			best := rep.Best()
-			if best == nil {
+			// Exit status makes the suite usable as a gate in CI. With
+			// several models it gates on the best of them, matching how
+			// --all-devices gates on the best target.
+			var topRate float64
+			executed := false
+			for _, r := range reports {
+				if b := r.Best(); b != nil {
+					executed = true
+					if b.Rate() > topRate {
+						topRate = b.Rate()
+					}
+				}
+			}
+			if !executed {
 				return fmt.Errorf("no target could execute the suite")
 			}
-			if failUnder > 0 && best.Rate() < failUnder {
-				return fmt.Errorf("pass rate %.1f%% is below --fail-under %.1f%%", best.Rate(), failUnder)
+			if failUnder > 0 && topRate < failUnder {
+				return fmt.Errorf("pass rate %.1f%% is below --fail-under %.1f%%", topRate, failUnder)
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&suitePath, "suite", "", "suite file (default: the unit's evals/ directory)")
+	cmd.Flags().StringArrayVar(&extraModels, "model", nil,
+		"also score the suite against this model (repeatable) — answers whether a cheaper model would do")
 	cmd.Flags().StringVar(&device, "device", "", "restrict to one device: npu, gpu, or cpu")
 	cmd.Flags().StringVar(&backendName, "backend", "", "restrict to one backend")
 	cmd.Flags().IntVar(&repeats, "repeats", 1, "runs per case; above 1, cases that don't pass every run are reported flaky")
@@ -855,21 +925,29 @@ func newEvalListCmd() *cobra.Command {
 			}
 			// Widths follow the data: IDs carry a suite slug of any
 			// length, and a wrapped table is unreadable.
-			idW, unitW, suiteW := len("ID"), len("UNIT"), len("SUITE")
+			// The model column matters once a sweep exists: several reports
+			// for one unit differ only by the model they scored.
+			idW, unitW, modelW := len("ID"), len("UNIT"), len("MODEL")
+			label := func(r *eval.Report) string {
+				if r.ModelOverride {
+					return r.Model + " (--model)"
+				}
+				return r.Model
+			}
 			for _, r := range reports {
 				idW = max(idW, len(r.ID))
 				unitW = max(unitW, len(r.Unit))
-				suiteW = max(suiteW, len(r.Suite))
+				modelW = max(modelW, len(label(r)))
 			}
-			row := fmt.Sprintf("  %%-%ds  %%-%ds  %%-%ds  %%7s  %%s\n", idW, unitW, suiteW)
-			fmt.Printf(row, "ID", "UNIT", "SUITE", "BEST", "TARGET")
+			row := fmt.Sprintf("  %%-%ds  %%-%ds  %%-%ds  %%7s  %%s\n", idW, unitW, modelW)
+			fmt.Printf(row, "ID", "UNIT", "MODEL", "BEST", "TARGET")
 			for _, r := range reports {
 				rate, target := "—", "—"
 				if best := r.Best(); best != nil {
 					rate = fmt.Sprintf("%.1f%%", best.Rate())
 					target = best.Label()
 				}
-				fmt.Printf(row, r.ID, r.Unit, r.Suite, rate, target)
+				fmt.Printf(row, r.ID, r.Unit, label(r), rate, target)
 			}
 			return nil
 		},

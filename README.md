@@ -179,6 +179,28 @@ The faster path is the worse one — **5× the throughput, 25 points below** on
 quality, with identical weights and temperature 0 on both. Picking a backend
 on `nexus bench` alone would have picked the one that answers worse.
 
+### And the same question about the model
+
+`--model` scores one suite against several models, which answers "how much
+model does this job actually need?" Same host, temperature 0, four cases:
+
+```
+  MODEL                          PARAMS  QUANT         SIZE     PASS    RATE     tok/s
+  ────────────────────────────────────────────────────────────────────────────────────
+  ollama:codeqwen:latest         7.3B    Q4_0        3.9 GB      4/4    100%       7.5
+  ollama:llama3.1:8b             8.0B    Q4_K_M      4.6 GB      4/4    100%       6.7
+  ollama:deepseek-coder:latest   1B      Q4_0        740 MB      3/4     75%      36.7
+  ollama:phi3:latest *           3.8B    Q4_0        2.0 GB      3/4     75%      13.3
+  ollama:starcoder2:3b           3B      Q4_0        1.6 GB      1/4     25%      16.5
+```
+
+**740 MB scored what 2.0 GB scored, 2.8× faster** — this unit's default model
+was paying 2.7× the disk and latency for nothing. Meanwhile `starcoder2:3b` is
+twice the size of the 1B model and scored a third as well, because it is a
+base model that cannot follow a system prompt: **size is not the axis,
+training is**. And the two models tied at 75% failed *different* cases, which
+is why the scorecard prints failures rather than only a rate.
+
 Suites live in `evals/` inside the unit, so they are packed into the artifact
 and travel with it: whoever pulls the unit can rerun the evaluation instead
 of trusting a published number. `--compare` diffs against the last run, and

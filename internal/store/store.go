@@ -66,6 +66,14 @@ type ResolvedModel struct {
 	Size   int64
 	Source string // where it came from, for logging
 	Shared bool   // true when the file is owned by another tool (e.g. Ollama)
+
+	// Quant and Params describe the weights when the source can say so.
+	// They matter because quality depends on them: the same agent at Q4 and
+	// at Q3 is not the same agent, and a score with no record of which one
+	// ran is not a measurement of anything. Ollama states both in its
+	// manifest; a bare .gguf file only hints at the quant in its filename.
+	Quant  string // Q4_K_M, Q4_0, F16 …
+	Params string // 1B, 8B … as the source labels it
 }
 
 // Progress reports download progress. It may be nil.
@@ -286,6 +294,9 @@ func (s *Store) recordDownload(source, digest string) {
 // --- Ollama interop -------------------------------------------------------
 
 type ollamaManifest struct {
+	Config struct {
+		Digest string `json:"digest"`
+	} `json:"config"`
 	Layers []struct {
 		MediaType string `json:"mediaType"`
 		Digest    string `json:"digest"`
@@ -346,17 +357,45 @@ func resolveOllama(ref string) (*ResolvedModel, error) {
 			if _, err := os.Stat(blob); err != nil {
 				return nil, fmt.Errorf("ollama model layer missing at %s: %w", blob, err)
 			}
+			quant, params := ollamaModelInfo(root, m.Config.Digest)
 			return &ResolvedModel{
 				Path:   blob,
 				Digest: l.Digest,
 				Size:   l.Size,
 				Source: "ollama:" + ref,
 				Shared: true,
+				Quant:  quant,
+				Params: params,
 			}, nil
 		}
 		return nil, fmt.Errorf("ollama model %q has no weights layer", ref)
 	}
 	return nil, fmt.Errorf("ollama model %q not found; looked in:\n  %s", ref, strings.Join(tried, "\n  "))
+}
+
+// ollamaModelInfo reads the quantization and parameter count Ollama records
+// in its manifest config blob. Weights borrowed from Ollama are stored under
+// their digest, so the filename says nothing — but the metadata is right
+// there, and an evaluation is worth much less without it.
+//
+// Best-effort: a missing or changed config shape costs an empty column, never
+// a failed resolve.
+func ollamaModelInfo(root, configDigest string) (quant, params string) {
+	if configDigest == "" {
+		return "", ""
+	}
+	data, err := os.ReadFile(filepath.Join(root, "blobs", strings.Replace(configDigest, ":", "-", 1)))
+	if err != nil {
+		return "", ""
+	}
+	var cfg struct {
+		FileType  string `json:"file_type"`
+		ModelType string `json:"model_type"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", ""
+	}
+	return cfg.FileType, cfg.ModelType
 }
 
 // ListOllamaModels enumerates locally available Ollama models, so

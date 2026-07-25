@@ -38,6 +38,18 @@ type Options struct {
 	ModelRef    string
 	ModelDigest string
 
+	// ModelQuant, ModelParams and ModelSize describe the weights when the
+	// source could say. Quality depends on all three, so a score recorded
+	// without them cannot be compared with anything later.
+	ModelQuant  string
+	ModelParams string
+	ModelSize   int64
+
+	// ModelOverride marks a run whose model was supplied on the command
+	// line rather than taken from the unit. Such a score is not the unit's
+	// own score and must never be presented as one.
+	ModelOverride bool
+
 	// System is the unit's system prompt, used unless the suite or case
 	// overrides it.
 	System string
@@ -145,14 +157,18 @@ func (t TargetResult) Label() string { return t.Backend + "/" + t.Device }
 
 // Report is one evaluation of one unit under one set of conditions.
 type Report struct {
-	ID          string           `json:"id"`
-	Suite       string           `json:"suite"`
-	SuitePath   string           `json:"suite_path,omitempty"`
-	Unit        string           `json:"unit,omitempty"`
-	UnitDigest  string           `json:"unit_digest,omitempty"`
-	Model       string           `json:"model,omitempty"`
-	ModelDigest string           `json:"model_digest,omitempty"`
-	ModelQuant  string           `json:"model_quant,omitempty"`
+	ID            string `json:"id"`
+	Suite         string `json:"suite"`
+	SuitePath     string `json:"suite_path,omitempty"`
+	Unit          string `json:"unit,omitempty"`
+	UnitDigest    string `json:"unit_digest,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ModelDigest   string `json:"model_digest,omitempty"`
+	ModelQuant    string `json:"model_quant,omitempty"`
+	ModelParams   string `json:"model_params,omitempty"`
+	ModelSize     int64  `json:"model_size_bytes,omitempty"`
+	ModelOverride bool   `json:"model_override,omitempty"`
+
 	Host        *hardware.Report `json:"host"`
 	Repeats     int              `json:"repeats"`
 	Temperature float64          `json:"temperature"`
@@ -209,19 +225,22 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 
 	start := time.Now()
 	rep := &Report{
-		ID:          time.Now().UTC().Format("20060102T150405Z") + "-" + slug(opts.Suite.Name),
-		Suite:       opts.Suite.Name,
-		SuitePath:   opts.SuitePath,
-		Unit:        opts.UnitRef,
-		UnitDigest:  opts.UnitDigest,
-		Model:       opts.ModelRef,
-		ModelDigest: opts.ModelDigest,
-		ModelQuant:  quantHint(opts.ModelPath),
-		Host:        hw,
-		Repeats:     opts.Repeats,
-		Temperature: temp,
-		MaxTokens:   maxTok,
-		Timestamp:   time.Now(),
+		ID:            time.Now().UTC().Format("20060102T150405Z") + "-" + slug(opts.Suite.Name),
+		Suite:         opts.Suite.Name,
+		SuitePath:     opts.SuitePath,
+		Unit:          opts.UnitRef,
+		UnitDigest:    opts.UnitDigest,
+		Model:         opts.ModelRef,
+		ModelDigest:   opts.ModelDigest,
+		ModelQuant:    firstNonEmpty(opts.ModelQuant, quantHint(opts.ModelPath)),
+		ModelParams:   opts.ModelParams,
+		ModelSize:     opts.ModelSize,
+		ModelOverride: opts.ModelOverride,
+		Host:          hw,
+		Repeats:       opts.Repeats,
+		Temperature:   temp,
+		MaxTokens:     maxTok,
+		Timestamp:     time.Now(),
 	}
 
 	for _, c := range cands {
@@ -514,6 +533,15 @@ var reQuant = regexp.MustCompile(`(?i)(?:^|[-_.])(i?q\d+(?:_[a-z0-9]+)*|bf16|f16
 func quantHint(modelPath string) string {
 	if m := reQuant.FindStringSubmatch(filepath.Base(modelPath)); m != nil {
 		return strings.ToUpper(m[1])
+	}
+	return ""
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
 	}
 	return ""
 }
