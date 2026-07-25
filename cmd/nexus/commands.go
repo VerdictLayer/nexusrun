@@ -20,6 +20,7 @@ import (
 	"github.com/verdictlayer/nexusrun/internal/compose"
 	"github.com/verdictlayer/nexusrun/internal/daemon"
 	"github.com/verdictlayer/nexusrun/internal/engine"
+	"github.com/verdictlayer/nexusrun/internal/eval"
 	"github.com/verdictlayer/nexusrun/internal/hardware"
 	"github.com/verdictlayer/nexusrun/internal/manifest"
 	"github.com/verdictlayer/nexusrun/internal/runner"
@@ -168,8 +169,13 @@ func newRunCmd() *cobra.Command {
 			}
 			ref := args[0]
 
-			// Prefer a running daemon: it already holds the weights.
-			if !noDaemon {
+			// Prefer a running daemon: it already holds the weights. A unit
+			// that declares tools is the exception — the daemon has no
+			// tool-calling path, so asking it would silently produce an
+			// answer from a model that was never offered the tools. The
+			// peek is a manifest read from the local store; errors are
+			// ignored here and reported properly by the path below.
+			if !noDaemon && !unitDeclaresTools(ctx, s, ref) {
 				dreq := daemon.RunRequest{
 					Unit: ref, Prompt: prompt, MaxTokens: maxTokens, Device: device,
 				}
@@ -273,18 +279,59 @@ func newRunCmd() *cobra.Command {
 			if device != "" {
 				prefer = []string{device}
 			}
-			b, chosen, err := engine.Select(hw, prefer)
-			if err != nil {
-				return err
+
+			// A unit that declares tools is scheduled over the smaller set
+			// of backends that can carry them. Selecting from the usual set
+			// and hoping would land on llama-cli, which would generate a
+			// perfectly fluent answer having never been told the tools
+			// exist — the failure this whole path is arranged to prevent.
+			candidates := engine.All()
+			if len(m.Tools) > 0 {
+				candidates = engine.ToolCapable()
+				defer engine.ShutdownAll(candidates)
 			}
 			if backendName != "" {
-				for _, cand := range engine.All() {
+				var picked []engine.Backend
+				for _, cand := range candidates {
 					if cand.Name() == backendName {
-						b = cand
+						picked = append(picked, cand)
 					}
 				}
+				if len(picked) == 0 {
+					// Previously an unknown name was ignored and the
+					// auto-selected backend used instead, so a typo looked
+					// like it had been honoured.
+					var names []string
+					for _, cand := range candidates {
+						names = append(names, cand.Name())
+					}
+					return fmt.Errorf("unknown backend %q for this unit; candidates: %s",
+						backendName, strings.Join(names, ", "))
+				}
+				candidates = picked
+			}
+
+			b, chosen, err := engine.SelectFrom(candidates, hw, prefer)
+			if err != nil {
+				if len(m.Tools) > 0 {
+					return fmt.Errorf("%s declares %d tool(s), which needs a backend that can carry tool calls: %w",
+						m.Ref(), len(m.Tools), err)
+				}
+				return err
 			}
 			logf("running %s on %s via %s", m.Ref(), strings.ToUpper(chosen), b.Name())
+
+			tools := toolDefs(m.Tools)
+			if len(tools) > 0 {
+				// The candidate set should make this impossible; assert it
+				// anyway, because the failure it guards against is a unit
+				// answering as though it had declared no tools at all.
+				if !b.Probe().SupportsTools {
+					return fmt.Errorf("backend %s cannot carry tool calls, and %s declares %d",
+						b.Name(), m.Ref(), len(tools))
+				}
+				logf("offering %d tool(s): %s", len(tools), strings.Join(toolNames(m.Tools), ", "))
+			}
 
 			p := prompt
 			if p == "" {
@@ -311,6 +358,7 @@ func newRunCmd() *cobra.Command {
 				Context:     mod.Context,
 				Device:      chosen,
 				Chat:        m.Entrypoint.Type == "chat",
+				Tools:       tools,
 				Stream: func(chunk string) {
 					if !jsonOut {
 						fmt.Print(chunk)
@@ -326,10 +374,31 @@ func newRunCmd() *cobra.Command {
 			}
 			rec.TokensOut = res.TokensOut
 			rec.TokPerSec = res.EvalTPS
+
+			// The model asked to call a tool. Executing one is the next
+			// piece of work; until it exists, say exactly what was asked
+			// for and fail, because a unit whose tool call was dropped has
+			// not done its job and must not report success.
+			var toolErr error
+			if len(res.ToolCalls) > 0 {
+				var summaries []string
+				for _, c := range res.ToolCalls {
+					summaries = append(summaries, c.Summary())
+				}
+				toolErr = fmt.Errorf(
+					"the model asked to call %s, but tool execution is not implemented yet — see docs/TOOLS.md",
+					strings.Join(summaries, ", "))
+				rec.Error = toolErr.Error()
+				rec.ExitCode = 1
+			}
 			if err := s.SaveRun(rec); err != nil {
 				logf("warning: could not save run record: %v", err)
 			}
 			_ = os.WriteFile(s.LogPath(runID), []byte(res.Text), 0o644)
+
+			if toolErr != nil && !jsonOut {
+				return toolErr
+			}
 
 			if jsonOut {
 				enc := json.NewEncoder(os.Stdout)
@@ -338,7 +407,7 @@ func newRunCmd() *cobra.Command {
 			}
 			fmt.Printf("\n\n— %d tokens · %.1f tok/s · %s on %s\n",
 				res.TokensOut, res.EvalTPS, res.Backend, strings.ToUpper(res.Device))
-			return nil
+			return toolErr
 		},
 	}
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "prompt to send")
@@ -349,6 +418,45 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noDaemon, "no-daemon", false, "ignore a running daemon and execute directly")
 	cmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "run script units without confinement (trusted units only)")
 	return cmd
+}
+
+// unitDeclaresTools reports whether a unit reference or directory declares
+// any tools. It answers false on any error: the caller uses it only to skip
+// an optimisation, and the real load path reports the failure properly.
+func unitDeclaresTools(ctx context.Context, s *store.Store, ref string) bool {
+	if info, err := os.Stat(ref); err == nil && info.IsDir() {
+		m, err := manifest.Load(ref)
+		return err == nil && len(m.Tools) > 0
+	}
+	m, _, err := unit.Resolve(ctx, s, ref)
+	return err == nil && len(m.Tools) > 0
+}
+
+// toolDefs converts a unit's tool declarations into what the engine offers
+// the model. Only the parts the model needs to choose a tool cross over —
+// how a tool is executed, and what it is allowed to touch, are the
+// runtime's business and never reach the model.
+func toolDefs(tools []manifest.Tool) []engine.ToolDef {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]engine.ToolDef, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, engine.ToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.Parameters,
+		})
+	}
+	return out
+}
+
+func toolNames(tools []manifest.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		names = append(names, t.Name)
+	}
+	return names
 }
 
 // newSandboxExecCmd is an internal re-exec target. It applies the unit's
@@ -486,6 +594,321 @@ func runUnitDirect(ctx context.Context, s *store.Store, ref, prompt string, maxT
 		return "", 0, err
 	}
 	return res.Text, res.EvalTPS, nil
+}
+
+// --- eval -----------------------------------------------------------------
+
+// evalBackends returns the backend set for evaluation, plus a cleanup.
+//
+// It prefers llama-server where the plain scheduler prefers the CLI, and
+// the reason is the workload: a suite is dozens of prompts against one
+// model, so the CLI's per-call weight reload is paid dozens of times. A
+// warm server pays it once. The CLI is used only when no server exists,
+// and never alongside it — two llama.cpp targets on the same device would
+// measure the same engine twice and call it two data points.
+func evalBackends() ([]engine.Backend, func()) {
+	ls := &engine.LlamaServer{}
+	if ls.Probe().Available {
+		return []engine.Backend{ls, &engine.Ollama{}, &engine.ONNXRuntime{}}, ls.Shutdown
+	}
+	return []engine.Backend{&engine.LlamaCPP{}, &engine.Ollama{}, &engine.ONNXRuntime{}}, func() {}
+}
+
+func newEvalCmd() *cobra.Command {
+	var suitePath, device, backendName, compare string
+	var repeats int
+	var allDevices, jsonOut, noSave bool
+	var failUnder float64
+
+	cmd := &cobra.Command{
+		Use:   "eval <ref|dir>",
+		Short: "Score a unit against an eval suite on this hardware",
+		Long: `Eval runs a suite of cases against a unit and reports a pass rate keyed to
+the exact conditions that produced it: unit digest, model weights, backend,
+device, and host.
+
+That keying is the point. A local agent's answers change with the
+quantization of its weights and the device it runs on, not just with its
+prompt — a unit that passes at q8 on a workstation can fail at q3 on a Pi.
+A bare percentage hides that; ` + "`--all-devices`" + ` exposes it.
+
+Suites live in evals/ inside the unit, so they are packed into the artifact
+and travel with it: whoever pulls the unit can rerun the evaluation instead
+of trusting a published number.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			ref := args[0]
+
+			// A directory is evaluated straight from source — the inner
+			// loop while writing cases. A ref is unpacked so its suite
+			// (packed in the source layer) can be read.
+			var m *manifest.Manifest
+			sealed := map[string]string{}
+			srcDir := ""
+			unitDigest := ""
+			if info, statErr := os.Stat(ref); statErr == nil && info.IsDir() {
+				if m, err = manifest.Load(ref); err != nil {
+					return err
+				}
+				srcDir, _ = filepath.Abs(ref)
+				logf("evaluating unbuilt directory %s — the score is not pinned to a unit digest", srcDir)
+			} else {
+				if m, _, err = unit.Resolve(ctx, s, ref); err != nil {
+					return err
+				}
+				if unitDigest, err = unit.Digest(ctx, s, ref); err != nil {
+					return err
+				}
+				tmp, terr := os.MkdirTemp("", "nexus-eval-*")
+				if terr != nil {
+					return terr
+				}
+				defer os.RemoveAll(tmp)
+				if sealed, err = unit.Unpack(ctx, s, ref, tmp); err != nil {
+					return err
+				}
+				srcDir = tmp
+			}
+
+			if m.Entrypoint.Type != "chat" {
+				return fmt.Errorf("eval supports chat units; %s has entrypoint.type %q, which runs its own program rather than generating from a prompt",
+					m.Ref(), m.Entrypoint.Type)
+			}
+			if len(m.Models) == 0 {
+				return fmt.Errorf("unit %s declares no models", m.Ref())
+			}
+
+			if suitePath == "" {
+				if suitePath, err = eval.Discover(srcDir); err != nil {
+					return err
+				}
+			}
+			suite, err := eval.Load(suitePath)
+			if err != nil {
+				return err
+			}
+			// Record the suite's path within the unit, not the temporary
+			// directory a ref was unpacked into — "evals/suite.yaml" is
+			// provenance, "/tmp/nexus-eval-4148871461/…" is noise.
+			suiteRecorded := suitePath
+			if rel, rerr := filepath.Rel(srcDir, suitePath); rerr == nil && !strings.HasPrefix(rel, "..") {
+				suiteRecorded = rel
+			}
+
+			mod := m.Models[0]
+			modelPath, ok := sealed[mod.ID]
+			modelDigest := ""
+			if !ok {
+				resolved, rerr := s.Resolve(mod.Source, mod.SHA256, nil)
+				if rerr != nil {
+					return rerr
+				}
+				modelPath, modelDigest = resolved.Path, resolved.Digest
+			}
+
+			backends, cleanup := evalBackends()
+			defer cleanup()
+			if backendName != "" {
+				var picked []engine.Backend
+				for _, b := range backends {
+					if b.Name() == backendName {
+						picked = append(picked, b)
+					}
+				}
+				if len(picked) == 0 {
+					var names []string
+					for _, b := range backends {
+						names = append(names, b.Name())
+					}
+					return fmt.Errorf("backend %q is not available here; usable backends: %s",
+						backendName, strings.Join(names, ", "))
+				}
+				backends = picked
+			}
+
+			prefer := m.Hardware.Prefer
+			var devices []string
+			if device != "" {
+				prefer, devices = []string{device}, []string{device}
+			}
+
+			rep, err := eval.Run(ctx, eval.Options{
+				Suite:       suite,
+				SuitePath:   suiteRecorded,
+				UnitRef:     m.Ref(),
+				UnitDigest:  unitDigest,
+				ModelPath:   modelPath,
+				ModelRef:    mod.Source,
+				ModelDigest: modelDigest,
+				System:      m.Entrypoint.SystemPrompt,
+				Context:     mod.Context,
+				Chat:        true,
+				Repeats:     repeats,
+				Devices:     devices,
+				AllDevices:  allDevices,
+				Prefer:      prefer,
+				Backends:    backends,
+				Progress:    logf,
+			})
+			if err != nil {
+				return err
+			}
+
+			// Compare before printing the scorecard so the delta is the
+			// last thing on screen — it is what the reader came for.
+			var diff *eval.DiffReport
+			if compare != "" {
+				var before *eval.Report
+				if compare == "latest" {
+					if before, err = eval.Latest(s, rep.Unit); err != nil {
+						return err
+					}
+					if before == nil {
+						logf("no earlier saved evaluation for %s to compare against", rep.Unit)
+					}
+				} else if before, err = eval.LoadRecord(s, compare); err != nil {
+					return err
+				}
+				if before != nil {
+					diff = eval.Diff(before, rep)
+				}
+			}
+
+			if !noSave {
+				if err := eval.Save(s, rep); err != nil {
+					logf("warning: could not save evaluation: %v", err)
+				} else {
+					logf("saved as %s", rep.ID)
+				}
+			}
+
+			if jsonOut {
+				out := map[string]any{"report": rep}
+				if diff != nil {
+					out["diff"] = diff
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(out); err != nil {
+					return err
+				}
+			} else {
+				fmt.Printf("\n%s", rep.String())
+				if diff != nil {
+					fmt.Printf("\n%s", diff.String())
+				}
+			}
+
+			// Exit status makes the suite usable as a gate in CI.
+			best := rep.Best()
+			if best == nil {
+				return fmt.Errorf("no target could execute the suite")
+			}
+			if failUnder > 0 && best.Rate() < failUnder {
+				return fmt.Errorf("pass rate %.1f%% is below --fail-under %.1f%%", best.Rate(), failUnder)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&suitePath, "suite", "", "suite file (default: the unit's evals/ directory)")
+	cmd.Flags().StringVar(&device, "device", "", "restrict to one device: npu, gpu, or cpu")
+	cmd.Flags().StringVar(&backendName, "backend", "", "restrict to one backend")
+	cmd.Flags().IntVar(&repeats, "repeats", 1, "runs per case; above 1, cases that don't pass every run are reported flaky")
+	cmd.Flags().BoolVar(&allDevices, "all-devices", false, "evaluate on every usable backend/device pair, not just the one the unit would pick")
+	cmd.Flags().Float64Var(&failUnder, "fail-under", 0, "exit non-zero if the best pass rate is below this percentage")
+	cmd.Flags().StringVar(&compare, "compare", "", "diff against a saved evaluation ID (bare flag: the latest for this unit)")
+	cmd.Flags().Lookup("compare").NoOptDefVal = "latest"
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save the report")
+	cmd.AddCommand(newEvalListCmd(), newEvalDiffCmd())
+	return cmd
+}
+
+func newEvalListCmd() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List saved evaluations, newest first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			reports, err := eval.List(s)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(reports)
+			}
+			if len(reports) == 0 {
+				fmt.Printf("No evaluations yet. Run `%s eval <unit>` to create one.\n", binName)
+				return nil
+			}
+			// Widths follow the data: IDs carry a suite slug of any
+			// length, and a wrapped table is unreadable.
+			idW, unitW, suiteW := len("ID"), len("UNIT"), len("SUITE")
+			for _, r := range reports {
+				idW = max(idW, len(r.ID))
+				unitW = max(unitW, len(r.Unit))
+				suiteW = max(suiteW, len(r.Suite))
+			}
+			row := fmt.Sprintf("  %%-%ds  %%-%ds  %%-%ds  %%7s  %%s\n", idW, unitW, suiteW)
+			fmt.Printf(row, "ID", "UNIT", "SUITE", "BEST", "TARGET")
+			for _, r := range reports {
+				rate, target := "—", "—"
+				if best := r.Best(); best != nil {
+					rate = fmt.Sprintf("%.1f%%", best.Rate())
+					target = best.Label()
+				}
+				fmt.Printf(row, r.ID, r.Unit, r.Suite, rate, target)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	return cmd
+}
+
+func newEvalDiffCmd() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "diff <before-id> <after-id>",
+		Short: "Compare two saved evaluations case by case",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			before, err := eval.LoadRecord(s, args[0])
+			if err != nil {
+				return err
+			}
+			after, err := eval.LoadRecord(s, args[1])
+			if err != nil {
+				return err
+			}
+			d := eval.Diff(before, after)
+			if jsonOut {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(d)
+			}
+			fmt.Print(d.String())
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	return cmd
 }
 
 // --- list / inspect -------------------------------------------------------
@@ -682,14 +1105,21 @@ provider installed, shows up in the first list but not the second.`,
 			fmt.Printf("Detected hardware\n%s\n", indent(hw.String()))
 			fmt.Printf("Backend capability\n")
 			usable := map[string]bool{}
-			for _, c := range engine.ProbeAll() {
+			caps := engine.ProbeAll()
+			// Width follows the longest name; "llama.cpp/server" overflowed
+			// the fixed column and pushed every field on its row right.
+			nameW := 0
+			for _, c := range caps {
+				nameW = max(nameW, len(c.Backend))
+			}
+			for _, c := range caps {
 				status := "unavailable"
 				if c.Available {
 					status = "ready"
 				}
-				fmt.Printf("  %-14s %-12s %s\n", c.Backend, status, c.Detail)
+				fmt.Printf("  %-*s %-12s %s\n", nameW, c.Backend, status, c.Detail)
 				if c.Version != "" {
-					fmt.Printf("  %-14s %-12s version %s\n", "", "", c.Version)
+					fmt.Printf("  %-*s %-12s version %s\n", nameW, "", "", c.Version)
 				}
 				if c.Available {
 					for _, d := range c.Devices {
@@ -698,6 +1128,25 @@ provider installed, shows up in the first list but not the second.`,
 						}
 					}
 				}
+			}
+
+			// Tool calling is capability probing applied to tools: a unit
+			// that declares them needs a backend that can carry them, and
+			// which of the installed ones can is not obvious.
+			fmt.Printf("\nTool calling\n")
+			var toolCapable []string
+			for _, c := range caps {
+				switch {
+				case c.Available && c.SupportsTools:
+					toolCapable = append(toolCapable, c.Backend)
+					fmt.Printf("  %-*s %-12s native tool calls\n", nameW, c.Backend, "ready")
+				case c.Available:
+					fmt.Printf("  %-*s %-12s no tool-call support in this backend\n", nameW, c.Backend, "unsupported")
+				}
+			}
+			if len(toolCapable) == 0 {
+				fmt.Printf("  none — units that declare tools cannot run here.\n")
+				fmt.Printf("  Install llama-server (it ships beside llama-cli) or start Ollama.\n")
 			}
 
 			fmt.Printf("\nSandboxing:     %s\n", sandbox.Describe())

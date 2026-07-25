@@ -99,6 +99,41 @@ Measure real throughput on every usable device. Median of N runs.
 Backends with `AcceptsModelPath: false` (Ollama) are excluded — they
 choose their own device, so a per-device sweep would be meaningless.
 
+#### `nexus eval <ref|dir>`
+Score a unit against an eval suite and record the score against the
+conditions that produced it — unit digest, model weights, backend, device,
+host. See **[EVAL.md](EVAL.md)** for the suite format and the reasoning.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--suite` | the unit's `evals/` | Suite file to run |
+| `--device` | — | Restrict to one device: `npu`, `gpu`, `cpu` |
+| `--backend` | — | Restrict to one backend |
+| `--repeats` | `1` | Runs per case; above 1, cases that don't pass every run are reported flaky |
+| `--all-devices` | `false` | Evaluate every usable backend/device pair, not just the one the unit would pick |
+| `--fail-under` | `0` | Exit non-zero if the best pass rate is below this percentage |
+| `--compare` | — | Diff against a saved evaluation ID; bare flag means the latest for this unit |
+| `--json` | `false` | Emit JSON (`{report, diff}`) |
+| `--no-save` | `false` | Do not save the report |
+
+Unlike `nexus bench`, Ollama **is** included: it addresses models by name,
+so it is eligible whenever the unit's own model source names it
+(`ollama:…`). It is reported as device `AUTO`, because it chooses its own
+placement and NexusRun cannot claim otherwise. For the same reason it is
+excluded when `--device` is given.
+
+`llama-server` is preferred over `llama-cli` here, the reverse of one-shot
+`nexus run`: a suite is many prompts against one model, so a warm server
+pays the weight load once instead of per case.
+
+#### `nexus eval list`
+List saved evaluations, newest first. `--json` available.
+
+#### `nexus eval diff <before-id> <after-id>`
+Compare two saved evaluations case by case. States when the two are not
+comparable — different suite, unit build, weights, or temperature.
+`--json` available.
+
 #### `nexus models`
 List models available locally, including ones Ollama already pulled.
 
@@ -169,7 +204,19 @@ entrypoint:
   system_prompt: |
     You are a careful research assistant.
 
-tools: []                          # accepted but not yet consumed
+tools:                             # offered to the model; see below
+  - name: search_notes             # required, [A-Za-z0-9_-]{1,64}
+    description: Search my notes   # required — what the model selects on
+    parameters:                    # optional JSON Schema object
+      type: object
+      properties:
+        query: {type: string}
+      required: [query]
+    exec:
+      type: script                 # required; script is the only kind
+      command: ["python3", "tools/search.py"]
+    capabilities: [storage]        # subset of the unit's capabilities
+
 capabilities: [network]            # sandbox grants; see below
 hardware:
   prefer: [npu, gpu, cpu]          # ordered; first *usable* one wins
@@ -211,6 +258,25 @@ Anything not declared is denied, enforced by the kernel via Landlock.
 
 Linux only. See [SANDBOXING.md](SANDBOXING.md) for enforcement details
 and limits before trusting it with genuinely hostile code.
+
+Unknown capability names are rejected rather than ignored, so a typo cannot
+read as a grant while granting nothing.
+
+### Tools
+
+A tool's `capabilities` must be a subset of the unit's, so the unit's
+top-level list stays the complete account of what the artifact can reach.
+
+Tool calling requires a backend with a chat-completions endpoint —
+`llama-server` or Ollama, reported under "Tool calling" by `nexus doctor`.
+A unit declaring tools is scheduled over that smaller candidate set, and
+fails with the reason if nothing on the host qualifies.
+
+**Execution is not implemented yet.** Tools are validated, offered to the
+model, and the model's request is reported — then the run fails rather than
+answering as though the tools were absent. See **[TOOLS.md](TOOLS.md)** for
+the full picture, including the `--jinja` requirement and why the warm
+daemon refuses tool units.
 
 ### Hardware preference
 
@@ -260,7 +326,13 @@ $NEXUSRUN_HOME/            default ~/.nexusrun
   units/                   OCI image layout for packaged units
   logs/<run-id>.json       run records (RunRecord)
   logs/<run-id>.log        captured stdout/stderr
+  evals/<eval-id>.json     saved evaluation reports (eval.Report)
 ```
+
+Evaluations live beside runs rather than inside a unit because a score
+belongs to a (unit, model, host) triple, not to the unit alone: the same
+artifact scores differently on different machines, and both numbers are
+worth keeping.
 
 Models resolved from Ollama are **not** copied here — they are executed
 in place from Ollama's own blob store.

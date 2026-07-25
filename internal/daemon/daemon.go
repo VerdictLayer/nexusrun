@@ -78,6 +78,14 @@ func (p *Pool) Run(ctx context.Context, req RunRequest) (*RunResponse, error) {
 	if len(m.Models) == 0 {
 		return nil, fmt.Errorf("unit %s declares no models", m.Ref())
 	}
+	// The warm pool has no tool-calling path. Serving a unit that declares
+	// tools would produce a fluent answer from a model that was never told
+	// the tools exist, which is indistinguishable from success.
+	if len(m.Tools) > 0 {
+		return nil, fmt.Errorf(
+			"unit %s declares %d tool(s); the warm-model daemon cannot carry tool calls yet — run it directly with `nexus run --no-daemon`",
+			m.Ref(), len(m.Tools))
+	}
 	mod := m.Models[0]
 
 	resolved, err := p.store.Resolve(mod.Source, mod.SHA256, nil)

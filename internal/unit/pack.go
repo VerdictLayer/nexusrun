@@ -267,6 +267,21 @@ func Resolve(ctx context.Context, s *store.Store, ref string) (*manifest.Manifes
 	return &m, om, nil
 }
 
+// Digest returns the artifact manifest digest of a locally stored unit.
+// It is the unit's identity: an evaluation score or a signature means
+// nothing without the digest of exactly what was measured or signed.
+func Digest(ctx context.Context, s *store.Store, ref string) (string, error) {
+	st, err := oci.New(s.UnitsDir())
+	if err != nil {
+		return "", err
+	}
+	desc, err := st.Resolve(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("unit %q not found locally: %w", ref, err)
+	}
+	return desc.Digest.String(), nil
+}
+
 // Unpack extracts a unit's source layer into destDir and returns the
 // paths of any sealed model layers, keyed by model ID.
 func Unpack(ctx context.Context, s *store.Store, ref, destDir string) (map[string]string, error) {

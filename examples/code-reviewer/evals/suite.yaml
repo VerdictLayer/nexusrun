@@ -1,0 +1,71 @@
+apiVersion: nexusrun.dev/v1
+kind: EvalSuite
+name: code-reviewer-basics
+description: |
+  Does this unit still find real bugs, stay quiet about correct code, and
+  keep to the length its system prompt asks for?
+
+  The assertions are deliberately tolerant about wording and strict about
+  behaviour. A review that describes the right bug in unexpected words is
+  a pass; a refusal, a wall of style opinions, or an invented bug in
+  correct code is a failure. Tightening the wording would measure the
+  phrasing of one model rather than the usefulness of the unit.
+
+# 128 tokens is enough for a two-item review and keeps the suite quick.
+max_tokens: 128
+
+cases:
+  - name: finds-index-out-of-range
+    prompt: |
+      Review this Go function:
+
+      func last(xs []int) int {
+          return xs[len(xs)]
+      }
+    expect:
+      # Any of these words means the bug was located; models describe the
+      # same defect as an index error, a bounds problem, or a panic.
+      one_of: ["out of range", "out-of-range", "index", "bounds", "panic", "len(xs)-1"]
+      not_contains: ["I cannot", "I'm unable", "as an AI"]
+
+  - name: finds-nil-map-write
+    prompt: |
+      Review this Go function:
+
+      func tally(words []string) map[string]int {
+          var counts map[string]int
+          for _, w := range words {
+              counts[w]++
+          }
+          return counts
+      }
+    expect:
+      one_of: ["nil map", "nil-map", "not initialized", "uninitialized", "make(map", "panic"]
+      not_contains: ["I cannot", "as an AI"]
+
+  - name: flags-misleading-name
+    prompt: |
+      Review this Go function:
+
+      func isEmpty(s string) int {
+          return len(s)
+      }
+    expect:
+      # The system prompt asks for misleading names specifically, so the
+      # name — not the return type — is the finding being tested for.
+      one_of: ["name", "misleading", "misnamed", "isEmpty should", "bool"]
+      not_contains: ["I cannot", "as an AI"]
+
+  - name: stays-quiet-on-correct-code
+    prompt: |
+      Review this Go function:
+
+      func add(a, b int) int {
+          return a + b
+      }
+    expect:
+      # The unit is told to say so in one line when code is fine. Inventing
+      # a bug here is the failure mode that makes a reviewer unusable, and
+      # it is where a smaller quantization degrades first.
+      one_of: ["fine", "correct", "no bugs", "no issues", "nothing"]
+      max_words: 60

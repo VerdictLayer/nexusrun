@@ -50,6 +50,17 @@ type Request struct {
 	// they continue the text instead of answering it.
 	Chat bool
 
+	// Messages, when set, is the conversation to continue and takes
+	// precedence over System and Prompt. A tool-calling exchange needs it:
+	// a tool call is a turn the model takes and a tool result is a turn it
+	// is answered with, neither of which a single prompt can express.
+	Messages []Message
+
+	// Tools offered to the model for this turn. Only backends reporting
+	// SupportsTools accept them; the rest fail loudly rather than dropping
+	// them and generating as if the unit had declared nothing.
+	Tools []ToolDef
+
 	// Stream, when non-nil, receives tokens as they are produced.
 	Stream func(chunk string)
 }
@@ -61,7 +72,12 @@ type Request struct {
 // reaches this struct directly and daemon.RunResponse when a warm pool
 // answers, so the two paths must not disagree on casing.
 type Result struct {
-	Text      string        `json:"text"`
+	Text string `json:"text"`
+
+	// ToolCalls is set when the model asked to invoke tools rather than
+	// (or as well as) answering in text.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+
 	Backend   string        `json:"backend"`
 	Device    string        `json:"device"`
 	TokensOut int           `json:"tokens_out"`
@@ -89,6 +105,13 @@ type Capability struct {
 	// cannot run arbitrary unit weights and are excluded from
 	// path-based scheduling and benchmarking.
 	AcceptsModelPath bool `json:"accepts_model_path"`
+
+	// SupportsTools reports whether the backend can carry structured tool
+	// calls. This is capability probing applied to tools rather than
+	// devices, and for the same reason: a unit that declares tools running
+	// on a backend that ignores them is worse than one that refuses to
+	// start, because it looks like it worked.
+	SupportsTools bool `json:"supports_tools"`
 }
 
 // Backend executes models.
@@ -139,9 +162,18 @@ func SelectFrom(candidates []Backend, hw *hardware.Report, prefer []string) (Bac
 		}
 	}
 	if len(backends) == 0 {
+		// Iterating candidates rather than the map keeps this order stable;
+		// and an available backend excluded for addressing reasons must say
+		// so, not print a Detail that reads like an endorsement.
 		var why []string
-		for name, c := range caps {
-			why = append(why, fmt.Sprintf("%s: %s", name, c.Detail))
+		for _, b := range candidates {
+			c := caps[b.Name()]
+			if !c.Available {
+				why = append(why, fmt.Sprintf("%s: %s", b.Name(), c.Detail))
+				continue
+			}
+			why = append(why, fmt.Sprintf(
+				"%s: addresses models by name, not by path, so it cannot execute this unit's weights", b.Name()))
 		}
 		return nil, "", fmt.Errorf("no execution backend available:\n  %s", strings.Join(why, "\n  "))
 	}
@@ -157,14 +189,25 @@ func SelectFrom(candidates []Backend, hw *hardware.Report, prefer []string) (Bac
 			}
 		}
 	}
-	// Nothing matched the preference; fall back to the first backend's
-	// most capable device.
-	b := backends[0]
-	devs := caps[b.Name()].Devices
-	if len(devs) == 0 {
-		return nil, "", fmt.Errorf("backend %s reports no usable devices", b.Name())
+	// Nothing matched the preference. Fall back to the first backend's most
+	// capable device that this host actually has — capability alone is not
+	// enough here either. A llama.cpp built with CUDA reports GPU on a
+	// machine with no NVIDIA card in it, and offloading to it fails at
+	// generation time rather than here, where the reason is still legible.
+	for _, b := range backends {
+		for _, d := range caps[b.Name()].Devices {
+			if hw.Has(d) {
+				return b, d, nil
+			}
+		}
 	}
-	return b, devs[0], nil
+	var claimed []string
+	for _, b := range backends {
+		claimed = append(claimed, fmt.Sprintf("%s: %s", b.Name(), strings.Join(caps[b.Name()].Devices, ", ")))
+	}
+	return nil, "", fmt.Errorf(
+		"no backend can drive a device this host has (preference was %s):\n  %s",
+		strings.Join(prefer, ", "), strings.Join(claimed, "\n  "))
 }
 
 // --- llama.cpp ------------------------------------------------------------
@@ -213,6 +256,12 @@ func (l *LlamaCPP) Probe() Capability {
 	bin := l.binary()
 	if bin == "" {
 		c.Detail = "llama-cli not found in PATH (install llama.cpp or set NEXUSRUN_LLAMA_CLI)"
+		return c
+	}
+	// binary() takes an explicit NEXUSRUN_LLAMA_CLI at its word, so a typo
+	// there would be reported as "ready" and fail later at exec time.
+	if _, err := os.Stat(bin); err != nil {
+		c.Detail = fmt.Sprintf("llama-cli at %s is not usable: %v", bin, err)
 		return c
 	}
 	c.Available = true
@@ -271,6 +320,18 @@ func (l *LlamaCPP) Generate(ctx context.Context, req Request) (*Result, error) {
 	if bin == "" {
 		return nil, errors.New("llama-cli not found")
 	}
+	if len(req.Tools) > 0 {
+		return nil, errToolsUnsupported
+	}
+	// The CLI takes one system and one user turn. Anything richer — a tool
+	// result, a prior assistant turn — has to be refused here, because
+	// flattening it into a single prompt silently changes what is asked.
+	sys, user, ok := simpleTurn(req.Conversation())
+	if !ok {
+		return nil, errors.New("llama-cli cannot continue a multi-turn conversation; " +
+			"install llama-server (it ships beside llama-cli) or run through Ollama")
+	}
+	req.System, req.Prompt = sys, user
 
 	ngl := "0"
 	if req.Device == hardware.ClassGPU {
@@ -421,7 +482,11 @@ func (o *Ollama) Probe() Capability {
 	c.Available = true
 	c.Devices = []string{hardware.ClassGPU, hardware.ClassCPU}
 	c.Version = strings.Trim(extractJSONString(body, "version"), `"`)
-	c.Detail = "server reachable; runs ollama: models warm, picks its own device"
+	// Tool calling is native on /api/chat. Whether the *model* was trained
+	// for it is a separate question the server cannot answer up front: a
+	// model without tool training simply never emits a call.
+	c.SupportsTools = true
+	c.Detail = "server reachable; runs ollama: models warm, picks its own device; native tool calls"
 	return c
 }
 
@@ -447,15 +512,21 @@ func (o *Ollama) Generate(ctx context.Context, req Request) (*Result, error) {
 
 	var url string
 	var body map[string]any
-	if req.Chat {
-		msgs := []map[string]string{}
-		if req.System != "" {
-			msgs = append(msgs, map[string]string{"role": "system", "content": req.System})
-		}
-		msgs = append(msgs, map[string]string{"role": "user", "content": req.Prompt})
+	switch {
+	case req.Chat || len(req.Messages) > 0 || len(req.Tools) > 0:
 		url = o.host() + "/api/chat"
-		body = map[string]any{"model": name, "messages": msgs, "stream": false, "options": options}
-	} else {
+		body = map[string]any{
+			"model":    name,
+			"messages": messagesWire(req.Conversation()),
+			"stream":   false,
+			"options":  options,
+		}
+		if tools := toolsWire(req.Tools); tools != nil {
+			body["tools"] = tools
+		}
+	default:
+		// Raw completion: no turns, and therefore no tools — declaring any
+		// routes the request to the chat endpoint above instead.
 		url = o.host() + "/api/generate"
 		body = map[string]any{"model": name, "prompt": req.Prompt, "stream": false, "options": options}
 		if req.System != "" {
@@ -471,7 +542,8 @@ func (o *Ollama) Generate(ctx context.Context, req Request) (*Result, error) {
 	var parsed struct {
 		Response string `json:"response"`
 		Message  struct {
-			Content string `json:"content"`
+			Content   string         `json:"content"`
+			ToolCalls []wireToolCall `json:"tool_calls"`
 		} `json:"message"`
 		EvalCount       int    `json:"eval_count"`
 		EvalDuration    int64  `json:"eval_duration"`
@@ -496,6 +568,7 @@ func (o *Ollama) Generate(ctx context.Context, req Request) (*Result, error) {
 
 	res := &Result{
 		Text:      strings.TrimSpace(text),
+		ToolCalls: toolCallsFrom(parsed.Message.ToolCalls),
 		Backend:   o.Name(),
 		Device:    req.Device,
 		TokensOut: parsed.EvalCount,

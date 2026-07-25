@@ -31,7 +31,7 @@ enterprise laptop, or an air-gapped box.
 
 NexusRun takes the OCI packaging idea and removes the container requirement.
 
-### Three things it does that existing tools don't
+### Four things it does that existing tools don't
 
 **1. Reuses models you already have.** A unit references a model rather than
 embedding it. If you already pulled it with Ollama, NexusRun runs that exact
@@ -51,6 +51,13 @@ single file you can carry on a USB stick to a machine with no network.
 **3. It tells you the truth about your hardware.** Detecting a GPU is not the
 same as being able to use it. See below — this is the interesting part.
 
+**4. It scores the agent, per backend and device.** A local agent's answers
+change with the quantization of its weights and the backend that runs them,
+not just with its prompt. `nexus eval` runs a suite of cases and reports the
+pass rate keyed to the unit digest, the model digest, and the target it ran
+on — because on mixed hardware that is the only form of the number that
+means anything.
+
 ### How it compares
 
 |  | NexusRun | Ollama | Docker `cagent` | llama.cpp |
@@ -61,6 +68,7 @@ same as being able to use it. See below — this is the interesting part.
 | **Reuses** models already on disk | ✅ Ollama's blobs | n/a | ❌ | manual |
 | **Air-gapped** single-file transfer | ✅ `.nx` export | ❌ | ❌ | manual |
 | Reports **backend capability**, not just detection | ✅ | ❌ | ❌ | ❌ |
+| **Scores agent quality** per backend and device | ✅ | ❌ | ❌ | ❌ |
 | Runs the model itself | ❌ delegates | ✅ | ❌ delegates | ✅ |
 
 NexusRun is a layer *above* the inference engine, not a replacement for one.
@@ -79,7 +87,9 @@ untrusted agent scripts confined by the kernel.
 sits on top of it and adds nothing for that); need GPU inference verified today
 (implemented but unverified, see Status); need NPU execution (not implemented);
 need agent graphs with branching (composition is a sequential pipeline); or
-need MCP tool calling (the `tools:` field is accepted but does nothing yet).
+need tools that actually run (they are declared, validated, and offered to
+the model, but executing one is not implemented yet — see
+[docs/TOOLS.md](docs/TOOLS.md)).
 
 ---
 
@@ -145,6 +155,38 @@ sustained low power rather than peak throughput. Measure per host.
 See **[docs/NPU.md](docs/NPU.md)** for how NPU execution works, why it needs a
 different stack than GPUs, and how to test it.
 
+### The same argument, applied to quality
+
+Throughput is the easy half. The harder question is whether the agent still
+*works* on a given host, and it has the same shape: one number hides the
+answer. Same unit, same model digest, one machine, two backends:
+
+```
+Suite:    code-reviewer-basics (4 cases × 1 repeat(s))
+Unit:     code-reviewer:0.1.0 (2d10bd23171d)
+Model:    ollama:phi3:latest · quant unknown · 633fc5be925f
+Sampling: temperature 0.00 · max 128 tokens
+
+  DEVICE   BACKEND              PASS     RATE   FLAKY       tok/s
+  ───────────────────────────────────────────────────────────────
+  CPU      llama.cpp/server      3/4    75.0%       0       13.48
+  AUTO     ollama                2/4    50.0%       0       70.45
+
+Best: llama.cpp/server/cpu at 75.0%
+```
+
+The faster path is the worse one — **5× the throughput, 25 points below** on
+quality, with identical weights and temperature 0 on both. Picking a backend
+on `nexus bench` alone would have picked the one that answers worse.
+
+Suites live in `evals/` inside the unit, so they are packed into the artifact
+and travel with it: whoever pulls the unit can rerun the evaluation instead
+of trusting a published number. `--compare` diffs against the last run, and
+`--fail-under` turns a suite into a release gate.
+
+Details, the suite format, and what the numbers do *not* cover:
+**[docs/EVAL.md](docs/EVAL.md)**.
+
 ## Running untrusted units
 
 Script units execute arbitrary code, so they run under Landlock with only the
@@ -207,6 +249,10 @@ nexus serve     # → http://127.0.0.1:7717
 
 # Chain units together
 nexus compose extractor:0.1.0 summarizer:0.1.0 --input "$(cat report.txt)"
+
+# Does it still work? On every backend this host can use?
+nexus eval my-agent:0.1.0 --all-devices
+nexus eval my-agent:0.1.0 --compare --fail-under 80
 ```
 
 ## The unit format
@@ -249,6 +295,7 @@ instead of silently doing nothing.
 | `nexus export` / `import` | Portable `.nx` file for sneakernet and air-gap |
 | `nexus doctor` | Hardware vs. backend capability |
 | `nexus bench` | Measure real tok/s per device |
+| `nexus eval` | Score a unit against a suite, per backend and device |
 | `nexus models` | Local models, including reusable Ollama ones |
 | `nexus logs` | Run history and captured output |
 | `nexus serve` | Web console + warm-model daemon |
@@ -264,6 +311,8 @@ fast inner loop while developing.
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, repo map, how to add a backend or model source, testing |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Every command and flag, the manifest schema, env vars, on-disk and OCI layout |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the system is shaped this way — the design decisions and their trade-offs |
+| [docs/EVAL.md](docs/EVAL.md) | Scoring a unit per backend and device, the suite format, and what the numbers don't cover |
+| [docs/TOOLS.md](docs/TOOLS.md) | Declaring tools, which backends can carry them, per-tool capabilities, and what isn't built yet |
 | [docs/SANDBOXING.md](docs/SANDBOXING.md) | What Landlock enforces, and the limits to read before trusting it |
 | [docs/NPU.md](docs/NPU.md) | Why NPUs need a different stack than GPUs, and how to test one honestly |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Where help is most valuable, and the project's conventions |
@@ -290,6 +339,12 @@ Working and verified end-to-end on Linux:
   home, and outbound TCP are all denied by the kernel, while shell and Python
   units run normally (see [docs/SANDBOXING.md](docs/SANDBOXING.md))
 - **Pipeline composition** — `nexus compose a b c`
+- **Unit evaluation** — `nexus eval` scores a unit against a suite packed
+  inside the artifact, keyed to the unit and model digests, and reports per
+  backend and device. Verified end-to-end on the example unit: the same
+  weights scored 75% through `llama-server` and 50% through Ollama, which is
+  the sort of gap a single number hides
+  (see [docs/EVAL.md](docs/EVAL.md))
 - Benchmarking, run logging, web console
 
 Not done, and not pretended otherwise:
@@ -303,7 +358,17 @@ Not done, and not pretended otherwise:
   ever actually run on it. Verifying this needs a CUDA-enabled llama.cpp build.
 - **Sandboxing is Linux-only.** On macOS and Windows, script units refuse to run
   unless `--no-sandbox` is passed.
-- **Tools / MCP.** The manifest accepts a `tools:` list that nothing consumes yet.
+- **Tool execution.** Tools are declared in the manifest, validated at build
+  time, offered to the model, and the model's request is reported exactly as
+  it was made — verified with llama3.1:8b through `llama-server`. Executing
+  the tool and feeding its result back is the next piece of work. Until it
+  lands, a unit whose model calls a tool **fails** with a non-zero exit
+  rather than answering as though the tools were absent
+  ([docs/TOOLS.md](docs/TOOLS.md)). No MCP.
+- **Eval assertions are mechanical** — substring, regex, JSON shape. There is
+  no model-as-judge, deliberately: a judge's own quality varies with the
+  quantization and hardware `nexus eval` exists to measure, so it cannot be
+  the instrument. Script units cannot be evaluated at all yet.
 - **Multi-unit DAGs.** Composition is a sequential pipeline, not a graph.
 
 ## License

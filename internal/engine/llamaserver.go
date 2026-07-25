@@ -109,8 +109,18 @@ func (l *LlamaServer) Probe() Capability {
 		c.Detail = "llama-server not found (set NEXUSRUN_LLAMA_SERVER to enable warm models)"
 		return c
 	}
+	// An explicit override is taken at its word by binary(), so a typo in
+	// NEXUSRUN_LLAMA_SERVER would otherwise be reported as "ready" here and
+	// fail much later, at generation, as a fork/exec error.
+	if _, err := os.Stat(bin); err != nil {
+		c.Detail = fmt.Sprintf("llama-server at %s is not usable: %v", bin, err)
+		return c
+	}
 	c.Available = true
 	c.AcceptsModelPath = true
+	// The OpenAI-compatible endpoint carries tool calls natively, and it is
+	// the only local GGUF path that does — llama-cli has no equivalent.
+	c.SupportsTools = true
 	c.Devices = []string{hardware.ClassCPU}
 
 	if out, err := runWithLibPath(bin, "--version").CombinedOutput(); err == nil {
@@ -132,7 +142,10 @@ func (l *LlamaServer) Probe() Capability {
 
 // Generate sends a request to a warm server, starting one if needed.
 func (l *LlamaServer) Generate(ctx context.Context, req Request) (*Result, error) {
-	inst, err := l.acquire(ctx, req.ModelPath, req.Device, req.Context)
+	// Tool calling needs the model's own Jinja chat template: without
+	// --jinja, llama-server falls back to its built-in templates, which
+	// have no notion of tool calls, and the tools are quietly ignored.
+	inst, err := l.acquire(ctx, req.ModelPath, req.Device, req.Context, len(req.Tools) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -143,47 +156,83 @@ func (l *LlamaServer) Generate(ctx context.Context, req Request) (*Result, error
 		maxTok = 256
 	}
 
-	var (
-		url  string
-		body any
-	)
-	if req.Chat {
-		// The OpenAI-compatible endpoint applies the model's own chat
-		// template, which is what instruction-tuned models expect.
-		msgs := []map[string]string{}
-		if req.System != "" {
-			msgs = append(msgs, map[string]string{"role": "system", "content": req.System})
-		}
-		msgs = append(msgs, map[string]string{"role": "user", "content": req.Prompt})
-		url = fmt.Sprintf("http://127.0.0.1:%d/v1/chat/completions", inst.port)
-		body = map[string]any{
-			"messages":    msgs,
-			"max_tokens":  maxTok,
-			"temperature": req.Temperature,
-		}
-	} else {
-		prompt := req.Prompt
-		if req.System != "" {
-			prompt = req.System + "\n\n" + req.Prompt
-		}
-		url = fmt.Sprintf("http://127.0.0.1:%d/completion", inst.port)
-		body = map[string]any{
-			"prompt":      prompt,
-			"n_predict":   maxTok,
-			"temperature": req.Temperature,
-		}
-	}
-
-	raw, err := postJSON(ctx, url, body)
+	url, body, err := serverRequest(req, maxTok)
 	if err != nil {
 		return nil, err
 	}
+	raw, err := postJSON(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", inst.port, url), body)
+	if err != nil {
+		return nil, err
+	}
+	reply, err := parseServerReply(raw)
+	if err != nil {
+		return nil, err
+	}
+	if req.Stream != nil {
+		req.Stream(reply.Text)
+	}
 
+	return &Result{
+		Text:      strings.TrimSpace(reply.Text),
+		ToolCalls: reply.ToolCalls,
+		Backend:   l.Name(),
+		Device:    req.Device,
+		TokensOut: reply.Tokens,
+		PromptTPS: reply.PromptTPS,
+		EvalTPS:   reply.EvalTPS,
+		WallTime:  time.Since(start),
+	}, nil
+}
+
+// serverRequest builds the endpoint path and body for one request.
+//
+// It is separate from Generate so the wire format can be tested without
+// starting a real llama-server and loading multi-gigabyte weights.
+func serverRequest(req Request, maxTok int) (path string, body map[string]any, err error) {
+	// Declaring tools implies a conversation: there is no turn on the
+	// completion endpoint for a tool call to occupy, so tools route here
+	// whether or not the caller set Chat.
+	if req.Chat || len(req.Messages) > 0 || len(req.Tools) > 0 {
+		// The OpenAI-compatible endpoint applies the model's own chat
+		// template, which is what instruction-tuned models expect, and is
+		// the only one that carries tool calls.
+		body = map[string]any{
+			"messages":    messagesWire(req.Conversation()),
+			"max_tokens":  maxTok,
+			"temperature": req.Temperature,
+		}
+		if tools := toolsWire(req.Tools); tools != nil {
+			body["tools"] = tools
+		}
+		return "/v1/chat/completions", body, nil
+	}
+	prompt := req.Prompt
+	if req.System != "" {
+		prompt = req.System + "\n\n" + req.Prompt
+	}
+	return "/completion", map[string]any{
+		"prompt":      prompt,
+		"n_predict":   maxTok,
+		"temperature": req.Temperature,
+	}, nil
+}
+
+// serverReply is the decoded response, from either endpoint.
+type serverReply struct {
+	Text      string
+	ToolCalls []ToolCall
+	Tokens    int
+	PromptTPS float64
+	EvalTPS   float64
+}
+
+func parseServerReply(raw []byte) (*serverReply, error) {
 	var parsed struct {
 		Content string `json:"content"`
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string         `json:"content"`
+				ToolCalls []wireToolCall `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -205,37 +254,42 @@ func (l *LlamaServer) Generate(ctx context.Context, req Request) (*Result, error
 		return nil, fmt.Errorf("llama-server: %s", parsed.Error.Message)
 	}
 
-	text := parsed.Content
-	if len(parsed.Choices) > 0 {
-		text = parsed.Choices[0].Message.Content
-	}
-	tokens := parsed.Timings.PredictedN
-	if tokens == 0 {
-		tokens = parsed.Usage.CompletionTokens
-	}
-	if req.Stream != nil {
-		req.Stream(text)
-	}
-
-	return &Result{
-		Text:      strings.TrimSpace(text),
-		Backend:   l.Name(),
-		Device:    req.Device,
-		TokensOut: tokens,
+	r := &serverReply{
+		Text:      parsed.Content,
+		Tokens:    parsed.Timings.PredictedN,
 		PromptTPS: parsed.Timings.PromptPerSecond,
 		EvalTPS:   parsed.Timings.PredictedPerSecond,
-		WallTime:  time.Since(start),
-	}, nil
+	}
+	if len(parsed.Choices) > 0 {
+		r.Text = parsed.Choices[0].Message.Content
+		r.ToolCalls = toolCallsFrom(parsed.Choices[0].Message.ToolCalls)
+	}
+	if r.Tokens == 0 {
+		r.Tokens = parsed.Usage.CompletionTokens
+	}
+	return r, nil
+}
+
+// instanceKey identifies a running server. Jinja is part of it because
+// --jinja changes how prompts are templated: a tool-calling request must
+// not be answered by a server started without it, and a plain chat request
+// must not silently change templating because a tool run came first.
+func instanceKey(modelPath, device string, jinja bool) string {
+	key := modelPath + "|" + device
+	if jinja {
+		key += "|jinja"
+	}
+	return key
 }
 
 // acquire returns a ready server for the model, reusing a running one.
-func (l *LlamaServer) acquire(ctx context.Context, modelPath, device string, ctxSize int) (*serverInstance, error) {
+func (l *LlamaServer) acquire(ctx context.Context, modelPath, device string, ctxSize int, jinja bool) (*serverInstance, error) {
 	bin := l.binary()
 	if bin == "" {
 		return nil, errors.New("llama-server not found")
 	}
 
-	key := modelPath + "|" + device
+	key := instanceKey(modelPath, device, jinja)
 	l.mu.Lock()
 	if l.instances == nil {
 		l.instances = map[string]*serverInstance{}
@@ -259,13 +313,17 @@ func (l *LlamaServer) acquire(ctx context.Context, modelPath, device string, ctx
 		ctxSize = 4096
 	}
 
-	cmd := runWithLibPath(bin,
+	args := []string{
 		"-m", modelPath,
 		"--host", "127.0.0.1",
 		"--port", strconv.Itoa(port),
 		"-c", strconv.Itoa(ctxSize),
 		"-ngl", ngl,
-	)
+	}
+	if jinja {
+		args = append(args, "--jinja")
+	}
+	cmd := runWithLibPath(bin, args...)
 	logFile, _ := os.CreateTemp("", "nexus-llama-server-*.log")
 	if logFile != nil {
 		cmd.Stdout = logFile
@@ -357,11 +415,13 @@ func (l *LlamaServer) EvictIdle(idle time.Duration) int {
 	return evicted
 }
 
-// IsWarm reports whether a model is already resident for a device.
+// IsWarm reports whether a model is already resident for a device. It asks
+// about the plain (non-jinja) instance, which is what the warm-model daemon
+// serves.
 func (l *LlamaServer) IsWarm(modelPath, device string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	inst, ok := l.instances[modelPath+"|"+device]
+	inst, ok := l.instances[instanceKey(modelPath, device, false)]
 	return ok && inst.ready && inst.alive()
 }
 

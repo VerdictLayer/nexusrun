@@ -36,7 +36,7 @@ func Open() (*Store, error) {
 		root = filepath.Join(home, ".nexusrun")
 	}
 	s := &Store{Root: root}
-	for _, d := range []string{s.BlobsDir(), s.UnitsDir(), s.LogsDir()} {
+	for _, d := range []string{s.BlobsDir(), s.UnitsDir(), s.LogsDir(), s.EvalsDir()} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
@@ -47,6 +47,12 @@ func Open() (*Store, error) {
 func (s *Store) BlobsDir() string { return filepath.Join(s.Root, "blobs", "sha256") }
 func (s *Store) UnitsDir() string { return filepath.Join(s.Root, "units") }
 func (s *Store) LogsDir() string  { return filepath.Join(s.Root, "logs") }
+
+// EvalsDir holds saved evaluation reports. They live beside runs rather
+// than inside a unit because a score belongs to a (unit, model, host)
+// triple, not to the unit alone — the same artifact scores differently on
+// different machines, and both numbers are worth keeping.
+func (s *Store) EvalsDir() string { return filepath.Join(s.Root, "evals") }
 
 // BlobPath returns the on-disk path for a sha256 hex digest.
 func (s *Store) BlobPath(digest string) string {
