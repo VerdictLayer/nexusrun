@@ -162,22 +162,25 @@ Throughput is the easy half. The harder question is whether the agent still
 answer. Same unit, same model digest, one machine, two backends:
 
 ```
-Suite:    code-reviewer-basics (4 cases × 1 repeat(s))
-Unit:     code-reviewer:0.1.0 (2d10bd23171d)
-Model:    ollama:phi3:latest · quant unknown · 633fc5be925f
+Suite:    code-reviewer-basics (13 cases × 1 repeat(s))
+Unit:     code-reviewer:0.1.0
+Model:    ollama:phi3:latest · Q4_0 · 633fc5be925f
 Sampling: temperature 0.00 · max 128 tokens
 
   DEVICE   BACKEND              PASS     RATE   FLAKY       tok/s
   ───────────────────────────────────────────────────────────────
-  CPU      llama.cpp/server      3/4    75.0%       0       13.48
-  AUTO     ollama                2/4    50.0%       0       70.45
+  CPU      llama.cpp/server    12/13    92.3%       0       13.57
+  AUTO     ollama              10/13    76.9%       0       86.99
 
-Best: llama.cpp/server/cpu at 75.0%
+Best: llama.cpp/server/cpu at 92.3%
 ```
 
-The faster path is the worse one — **5× the throughput, 25 points below** on
+The faster path is the worse one — **6.4× the throughput, 15 points below** on
 quality, with identical weights and temperature 0 on both. Picking a backend
-on `nexus bench` alone would have picked the one that answers worse.
+on `nexus bench` alone would have picked the one that answers worse. The
+failures say why: Ollama misses the same bug llama-server does, then adds two
+of its own by writing paragraphs about correct code where the unit was told to
+answer in one line.
 
 ### And the same question about the model
 
@@ -187,19 +190,23 @@ model does this job actually need?" Same host, temperature 0, four cases:
 ```
   MODEL                          PARAMS  QUANT         SIZE     PASS    RATE     tok/s
   ────────────────────────────────────────────────────────────────────────────────────
-  ollama:codeqwen:latest         7.3B    Q4_0        3.9 GB      4/4    100%       7.5
-  ollama:llama3.1:8b             8.0B    Q4_K_M      4.6 GB      4/4    100%       6.7
-  ollama:deepseek-coder:latest   1B      Q4_0        740 MB      3/4     75%      36.7
-  ollama:phi3:latest *           3.8B    Q4_0        2.0 GB      3/4     75%      13.3
-  ollama:starcoder2:3b           3B      Q4_0        1.6 GB      1/4     25%      16.5
+  ollama:llama3.1:8b             8.0B    Q4_K_M      4.6 GB    13/13    100%       6.3
+  ollama:phi3:latest *           3.8B    Q4_0        2.0 GB    12/13     92%      14.0
+  ollama:codeqwen:latest         7.3B    Q4_0        3.9 GB    12/13     92%       7.7
+  ollama:deepseek-coder:latest   1B      Q4_0        740 MB    10/13     77%      38.1
+  ollama:starcoder2:3b           3B      Q4_0        1.6 GB     3/13     23%      16.4
 ```
 
-**740 MB scored what 2.0 GB scored, 2.8× faster** — this unit's default model
-was paying 2.7× the disk and latency for nothing. Meanwhile `starcoder2:3b` is
-twice the size of the 1B model and scored a third as well, because it is a
-base model that cannot follow a system prompt: **size is not the axis,
-training is**. And the two models tied at 75% failed *different* cases, which
-is why the scorecard prints failures rather than only a rate.
+**2.0 GB scores what 3.9 GB scores, 1.8× faster.** And `starcoder2:3b` is more
+than twice the size of the 740 MB model while scoring a third as well, because
+it is a base model that was never taught to follow a system prompt: **size is
+not the axis, training is**. No leaderboard tells you that about *your* agent.
+
+The suite has 13 cases for a reason. An earlier 4-case version of it reported
+the 740 MB model tying `phi3` at 75% each — a finding that did not survive
+nine more cases, where they separate to 77% and 92%. A suite too small to
+distinguish two models will happily tell you they are equivalent, which is
+worth knowing before you cite one.
 
 Suites live in `evals/` inside the unit, so they are packed into the artifact
 and travel with it: whoever pulls the unit can rerun the evaluation instead
@@ -363,9 +370,9 @@ Working and verified end-to-end on Linux:
 - **Pipeline composition** — `nexus compose a b c`
 - **Unit evaluation** — `nexus eval` scores a unit against a suite packed
   inside the artifact, keyed to the unit and model digests, and reports per
-  backend and device. Verified end-to-end on the example unit: the same
-  weights scored 75% through `llama-server` and 50% through Ollama, which is
-  the sort of gap a single number hides
+  backend, device and model. Verified end-to-end on the example unit: the same
+  weights scored 92% through `llama-server` and 77% through Ollama, and a
+  2.0 GB model matched a 3.9 GB one — the sort of thing a single number hides
   (see [docs/EVAL.md](docs/EVAL.md))
 - Benchmarking, run logging, web console
 

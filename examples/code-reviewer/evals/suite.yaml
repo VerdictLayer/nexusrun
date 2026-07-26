@@ -11,10 +11,18 @@ description: |
   correct code is a failure. Tightening the wording would measure the
   phrasing of one model rather than the usefulness of the unit.
 
+  The mix is intentional: six cases where something is genuinely wrong,
+  four where nothing is, two about naming, and one that rewards reasoning
+  over pattern-matching. Without the "nothing is wrong" cases a model that
+  invents a bug every time would score well, which is the opposite of a
+  useful reviewer.
+
 # 128 tokens is enough for a two-item review and keeps the suite quick.
 max_tokens: 128
 
 cases:
+  # --- things that are genuinely broken -----------------------------------
+
   - name: finds-index-out-of-range
     prompt: |
       Review this Go function:
@@ -23,8 +31,8 @@ cases:
           return xs[len(xs)]
       }
     expect:
-      # Any of these words means the bug was located; models describe the
-      # same defect as an index error, a bounds problem, or a panic.
+      # Any of these means the bug was located; models describe the same
+      # defect as an index error, a bounds problem, or a panic.
       one_of: ["out of range", "out-of-range", "index", "bounds", "panic", "len(xs)-1"]
       not_contains: ["I cannot", "I'm unable", "as an AI"]
 
@@ -43,6 +51,79 @@ cases:
       one_of: ["nil map", "nil-map", "not initialized", "uninitialized", "make(map", "panic"]
       not_contains: ["I cannot", "as an AI"]
 
+  - name: finds-divide-by-zero
+    prompt: |
+      Review this Go function:
+
+      func ratio(a, b int) int {
+          return a / b
+      }
+    expect:
+      one_of: ["zero", "divide", "division", "panic"]
+      not_contains: ["I cannot", "as an AI"]
+
+  - name: finds-off-by-one-loop
+    prompt: |
+      Review this Go function:
+
+      func sum(xs []int) int {
+          total := 0
+          for i := 0; i <= len(xs); i++ {
+              total += xs[i]
+          }
+          return total
+      }
+    expect:
+      one_of: ["out of range", "off-by-one", "off by one", "<=", "bounds", "index", "panic"]
+      not_contains: ["I cannot", "as an AI"]
+
+  - name: finds-unchecked-type-assertion
+    prompt: |
+      Review this Go function:
+
+      func name(v any) string {
+          return v.(string)
+      }
+    expect:
+      one_of: ["panic", "assertion", "ok", "not a string", "comma-ok"]
+      not_contains: ["I cannot", "as an AI"]
+
+  - name: finds-ignored-error
+    prompt: |
+      Review this Go function:
+
+      func size(path string) int64 {
+          f, _ := os.Open(path)
+          defer f.Close()
+          info, _ := f.Stat()
+          return info.Size()
+      }
+    expect:
+      # The ignored error is the cause; the nil dereference is the symptom.
+      # Either one named is a find.
+      one_of: ["ignored", "ignoring", "nil", "error", "panic", "_ ="]
+      not_contains: ["I cannot", "as an AI"]
+
+  # --- reasoning, not pattern-matching ------------------------------------
+
+  - name: finds-pointer-comparison-of-copies
+    prompt: |
+      Review this Go function:
+
+      type User struct{ ID int }
+
+      func sameUser(a, b User) bool {
+          return &a == &b
+      }
+    expect:
+      # The parameters are copies, so their addresses always differ and the
+      # function always returns false. This one rewards reading over
+      # recognising a shape.
+      one_of: ["always", "never", "address", "pointer", "copies", "copy", "a.ID == b.ID", "false"]
+      not_contains: ["I cannot", "as an AI"]
+
+  # --- names that mislead --------------------------------------------------
+
   - name: flags-misleading-name
     prompt: |
       Review this Go function:
@@ -56,6 +137,19 @@ cases:
       one_of: ["name", "misleading", "misnamed", "isEmpty should", "bool"]
       not_contains: ["I cannot", "as an AI"]
 
+  - name: flags-name-contradicting-behaviour
+    prompt: |
+      Review this Go function:
+
+      func getUser(id int) error {
+          return db.Delete("users", id)
+      }
+    expect:
+      one_of: ["name", "misleading", "delete", "deletes", "does not get", "getUser"]
+      not_contains: ["I cannot", "as an AI"]
+
+  # --- correct code, which must not be "fixed" ----------------------------
+
   - name: stays-quiet-on-correct-code
     prompt: |
       Review this Go function:
@@ -67,5 +161,55 @@ cases:
       # The unit is told to say so in one line when code is fine. Inventing
       # a bug here is the failure mode that makes a reviewer unusable, and
       # it is where a smaller quantization degrades first.
-      one_of: ["fine", "correct", "no bugs", "no issues", "nothing"]
+      one_of: ["fine", "correct", "no bugs", "no issues", "nothing", "no problems"]
       max_words: 60
+
+  - name: stays-quiet-on-correct-branch
+    prompt: |
+      Review this Go function:
+
+      func larger(a, b int) int {
+          if a > b {
+              return a
+          }
+          return b
+      }
+    expect:
+      one_of: ["fine", "correct", "no bugs", "no issues", "nothing", "no problems"]
+      not_contains: ["I cannot", "as an AI"]
+
+  - name: stays-quiet-on-correct-loop
+    prompt: |
+      Review this Go function:
+
+      func contains(xs []string, want string) bool {
+          for _, x := range xs {
+              if x == want {
+                  return true
+              }
+          }
+          return false
+      }
+    expect:
+      one_of: ["fine", "correct", "no bugs", "no issues", "nothing", "no problems"]
+      max_words: 60
+
+  - name: ignores-style-when-code-is-correct
+    prompt: |
+      Review this Go function:
+
+      func f(x []int) int {
+          n := 0
+          for _, v := range x {
+              if v > 0 {
+                  n = n + v
+              }
+          }
+          return n
+      }
+    expect:
+      # Terse names and n = n + v instead of n += v are style, and the
+      # system prompt says to skip style. The code is correct, so the
+      # review should say so rather than find something to say.
+      one_of: ["fine", "correct", "no bugs", "no issues", "nothing", "no problems"]
+      not_contains: ["I cannot", "as an AI"]

@@ -419,7 +419,7 @@ func runTarget(ctx context.Context, c candidate, opts Options, temp float64, max
 		if cr.Flaky {
 			tr.Flaky++
 		}
-		logf("  [%d/%d] %-28s %s", i+1, len(opts.Suite.Cases), cs.Name, cr.Status())
+		logf("  [%d/%d] %-40s %s", i+1, len(opts.Suite.Cases), cs.Name, cr.Status())
 	}
 	tr.EvalTPS = median(tps)
 	return tr

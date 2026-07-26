@@ -15,31 +15,37 @@ answers, not just the speed.
 Same unit. Same model digest. One machine. Two backends:
 
 ```
-Suite:    code-reviewer-basics (4 cases × 1 repeat(s))
-Unit:     code-reviewer:0.1.0 (2d10bd23171d)
-Model:    ollama:phi3:latest · quant unknown · 633fc5be925f
+Suite:    code-reviewer-basics (13 cases × 1 repeat(s))
+Unit:     code-reviewer:0.1.0
+Model:    ollama:phi3:latest · Q4_0 · 633fc5be925f
 Host:     linux/amd64 · Intel(R) Xeon(R) W-10885M CPU @ 2.40GHz
 Sampling: temperature 0.00 · max 128 tokens
 
   DEVICE   BACKEND              PASS     RATE   FLAKY       tok/s
   ───────────────────────────────────────────────────────────────
-  CPU      llama.cpp/server      3/4    75.0%       0       13.48
-  AUTO     ollama                2/4    50.0%       0       70.45
+  CPU      llama.cpp/server    12/13    92.3%       0       13.57
+  AUTO     ollama              10/13    76.9%       0       86.99
 
-ollama/auto — 2 not passing:
+ollama/auto — 3 not passing:
   fail  finds-nil-map-write
       expected one_of "nil map | nil-map | not initialized | …"
-      got: 1. No bugs found that would actually fire at runtime based on the…
   fail  stays-quiet-on-correct-code
-      expected max_words "<= 60" — got 85 words
+      expected max_words "<= 60"
+  fail  stays-quiet-on-correct-loop
+      expected max_words "<= 60"
 
-Best: llama.cpp/server/cpu at 75.0%
+Best: llama.cpp/server/cpu at 92.3%
 ```
 
-The faster path is the worse one. Ollama is **5× the throughput and 25
+The faster path is the worse one. Ollama is **6.4× the throughput and 15
 points below** on quality, with identical weights and temperature 0 on both
 — the difference is in how each backend templates the prompt and handles
 stop tokens. Neither number is wrong; a single number would have been.
+
+The failing cases say what went wrong rather than only how much. Both
+backends miss the same nil-map bug; Ollama adds two of its own by writing
+paragraphs about code that is fine, where the unit's prompt asks for one
+line.
 
 This is the same argument `nexus doctor` makes about hardware, extended to
 output: measure on the host, per backend, and report the parts separately
@@ -62,37 +68,38 @@ nexus eval code-reviewer:0.1.0 \
   --model ollama:starcoder2:3b
 ```
 
-Real output, same host, temperature 0, four cases:
+Real output, same host, temperature 0, thirteen cases:
 
 ```
   MODEL                          PARAMS  QUANT         SIZE     PASS    RATE     tok/s
   ────────────────────────────────────────────────────────────────────────────────────
-  ollama:codeqwen:latest         7.3B    Q4_0        3.9 GB      4/4    100%       7.5
-  ollama:llama3.1:8b             8.0B    Q4_K_M      4.6 GB      4/4    100%       6.7
-  ollama:deepseek-coder:latest   1B      Q4_0        740 MB      3/4     75%      36.7
-  ollama:phi3:latest *           3.8B    Q4_0        2.0 GB      3/4     75%      13.3
-  ollama:starcoder2:3b           3B      Q4_0        1.6 GB      1/4     25%      16.5
+  ollama:llama3.1:8b             8.0B    Q4_K_M      4.6 GB    13/13    100%       6.3
+  ollama:phi3:latest *           3.8B    Q4_0        2.0 GB    12/13     92%      14.0
+  ollama:codeqwen:latest         7.3B    Q4_0        3.9 GB    12/13     92%       7.7
+  ollama:deepseek-coder:latest   1B      Q4_0        740 MB    10/13     77%      38.1
+  ollama:starcoder2:3b           3B      Q4_0        1.6 GB     3/13     23%      16.4
 
   * the unit's own model; the rest were supplied with --model
 ```
 
 Three things worth taking from that table:
 
-**A 740 MB model scored what a 2.0 GB model scored, 2.8× faster.** For this
-agent, `phi3` is paying 2.7× the disk and 2.7× the latency for nothing. The
-unit's default was chosen by reputation; the suite chose better.
+**A 2.0 GB model scores what a 3.9 GB model scores, 1.8× faster.** For this
+agent, `codeqwen` is paying nearly twice the disk and nearly twice the wait
+for nothing — and the unit's existing default is the one that wins.
 
 **Size is not the axis — training is.** `starcoder2:3b` is more than twice the
-size of the 1B model and scored a third as well. It is a base model, never
+size of the 740 MB model and scored a third as well. It is a base model, never
 instruction-tuned, and a base model cannot follow a system prompt that says
 "report only bugs and misleading names". No parameter count fixes that, and
 no benchmark chart tells you so for *your* prompt.
 
-**Equal scores hide different failures.** The 1B model and `phi3` both scored
-75%, but not on the same cases: the small one found the nil-map write and then
-invented a problem in correct code, while `phi3` did the reverse. If you only
-have the percentage you will pick between them by coin flip. This is why the
-scorecard prints failing cases and not just a rate.
+**A suite too small will invent a finding.** An earlier version of this suite
+had four cases, and on it the 740 MB model tied `phi3` at 75% each — an
+attractive result, and false. Nine more cases separated them to 77% and 92%.
+Four cases could not tell apart two models three sizes apart, so it reported
+them as equivalent. Thirteen cases is not many, and it was already enough to
+overturn the conclusion.
 
 Every row is a full, separately saved report, so any of them can be diffed
 later with `nexus eval diff`. Sizes are the weights layer only, which is why
@@ -252,6 +259,10 @@ a suite usable in CI or a pre-release check. Note that it gates on the
 - **All cases count equally.** There is no weighting, so a suite of
   fifteen easy cases and one critical one reports 94% when the critical
   one breaks. Split suites instead.
+- **A small suite is a misleading one.** With four cases each is worth 25
+  points, so one lucky answer reads as a real difference. The example suite
+  overturned its own headline finding when it grew from four cases to
+  thirteen. Write more cases than feels necessary before quoting a number.
 - **Quantization is a filename hint.** Weights borrowed from Ollama are
   stored under their digest with no filename to read, so the quant column
   says `unknown` there. The digest still pins the exact weights.
