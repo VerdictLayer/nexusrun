@@ -33,7 +33,13 @@ import (
 
 // OCI media types for the NexusRun artifact format.
 const (
-	ArtifactType       = "application/vnd.nexusrun.unit.v1"
+	ArtifactType = "application/vnd.nexusrun.unit.v1"
+
+	// ArtifactTypeWorkflow is package workflow's type, duplicated here so
+	// this package can recognise one without importing it — workflow
+	// already depends on the OCI plumbing this package owns.
+	ArtifactTypeWorkflow = "application/vnd.nexusrun.workflow.v1"
+
 	MediaTypeConfig    = "application/vnd.nexusrun.unit.config.v1+json"
 	MediaTypeSource    = "application/vnd.nexusrun.unit.source.v1.tar+gzip"
 	MediaTypeModelGGUF = "application/vnd.nexusrun.model.v1.gguf"
@@ -58,6 +64,14 @@ type BuildOptions struct {
 	Out string
 
 	Progress func(format string, args ...any)
+}
+
+// sealTarget is one set of weights to embed: a named model, or one
+// candidate of an auto-selecting entry.
+type sealTarget struct {
+	id     string
+	source string
+	sha    string
 }
 
 // Built describes the result of a build.
@@ -105,30 +119,55 @@ func Build(ctx context.Context, s *store.Store, dir string, opts BuildOptions) (
 
 	// Layer 2..n: model weights, embedded only when sealing.
 	for _, mod := range m.Models {
+		// An auto-selecting entry has no single model. Sealing one means
+		// embedding every candidate: the target machine has to measure them
+		// to choose, and an air-gapped device cannot fetch what is missing.
+		// That is expensive and deliberate, so it is logged per candidate.
+		sources := []sealTarget{{id: mod.ID, source: mod.Source, sha: mod.SHA256}}
+		if mod.Auto() {
+			sources = sources[:0]
+			for i, c := range mod.Candidates {
+				sources = append(sources, sealTarget{
+					id: fmt.Sprintf("%s.%d", mod.ID, i), source: c.Source, sha: c.SHA256,
+				})
+			}
+		}
+
 		if !opts.Seal {
-			logf("model %q linked (source: %s)", mod.ID, mod.Source)
+			if mod.Auto() {
+				logf("model %q selects from %d candidate(s) at run time, all linked", mod.ID, len(mod.Candidates))
+			} else {
+				logf("model %q linked (source: %s)", mod.ID, mod.Source)
+			}
 			continue
 		}
-		logf("resolving model %q for sealing…", mod.ID)
-		rm, err := s.Resolve(mod.Source, mod.SHA256, nil)
-		if err != nil {
-			return nil, fmt.Errorf("seal model %q: %w", mod.ID, err)
+		if mod.Auto() {
+			logf("model %q is auto-selecting; sealing all %d candidate(s) so the target can still choose offline",
+				mod.ID, len(sources))
 		}
-		logf("embedding %s (%s) — this copies the weights into the artifact", mod.ID, humanSize(rm.Size))
-		f, err := os.Open(rm.Path)
-		if err != nil {
-			return nil, err
+
+		for _, t := range sources {
+			logf("resolving model %q for sealing…", t.id)
+			rm, err := s.Resolve(t.source, t.sha, nil)
+			if err != nil {
+				return nil, fmt.Errorf("seal model %q: %w", t.id, err)
+			}
+			logf("embedding %s (%s) — this copies the weights into the artifact", t.id, humanSize(rm.Size))
+			f, err := os.Open(rm.Path)
+			if err != nil {
+				return nil, err
+			}
+			desc, err := pushReader(ctx, ociStore, MediaTypeModelGGUF, f, rm.Size, map[string]string{
+				ocispec.AnnotationTitle: t.id + ".gguf",
+				AnnotationModelID:       t.id,
+				AnnotationModelSource:   t.source,
+			})
+			f.Close()
+			if err != nil {
+				return nil, err
+			}
+			layers = append(layers, desc)
 		}
-		desc, err := pushReader(ctx, ociStore, MediaTypeModelGGUF, f, rm.Size, map[string]string{
-			ocispec.AnnotationTitle: mod.ID + ".gguf",
-			AnnotationModelID:       mod.ID,
-			AnnotationModelSource:   mod.Source,
-		})
-		f.Close()
-		if err != nil {
-			return nil, err
-		}
-		layers = append(layers, desc)
 	}
 
 	// Config: the manifest itself, as canonical JSON.
@@ -249,6 +288,19 @@ func Resolve(ctx context.Context, s *store.Store, ref string) (*manifest.Manifes
 	}
 	if err := json.Unmarshal(data, &om); err != nil {
 		return nil, om, err
+	}
+
+	// A workflow is a different artifact type sharing this store. Its
+	// config decodes into a Manifest well enough to look plausible — same
+	// name, version and description keys — and would then run as a unit
+	// with no models, reported as a manifest problem rather than as the
+	// wrong command. Refuse it by type instead.
+	if om.ArtifactType != "" && om.ArtifactType != ArtifactType {
+		if om.ArtifactType == ArtifactTypeWorkflow {
+			return nil, om, fmt.Errorf(
+				"%s is a workflow, not a unit — run it with `nexus compose up -f %s`", ref, ref)
+		}
+		return nil, om, fmt.Errorf("%s is not a NexusRun unit (artifact type %s)", ref, om.ArtifactType)
 	}
 
 	cfgRC, err := st.Fetch(ctx, om.Config)

@@ -93,6 +93,18 @@ func ToolCapable() []Backend {
 	return []Backend{&LlamaServer{}, &Ollama{}}
 }
 
+// Conversational returns the backends that can carry more than one turn.
+//
+// It is the same set as ToolCapable, for the same underlying reason — both
+// need the chat-completions endpoint — but the two are separate functions
+// because they answer different questions. A session with history needs
+// this one even when no tool is involved, and conflating them made a
+// resumed conversation get scheduled onto llama-cli, which can express
+// exactly one system turn and one user turn and rejects anything more.
+func Conversational() []Backend {
+	return []Backend{&LlamaServer{}, &Ollama{}}
+}
+
 // errToolsUnsupported is returned by backends that cannot carry tool
 // calls, rather than dropping the tools and generating anyway.
 var errToolsUnsupported = errors.New(

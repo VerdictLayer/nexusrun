@@ -41,6 +41,16 @@ type Options struct {
 	// that applies the sandbox policy before handing off to the script.
 	SelfExe string
 
+	// Env is extra KEY=VALUE entries — the unit's declared secrets and
+	// config, already resolved. They are appended to the small fixed
+	// environment below rather than replacing it.
+	Env []string
+
+	// ReadPaths are additional files the sandbox must allow reading, such
+	// as mounted secret files. Without this a mounted certificate would be
+	// handed to the script as a path the kernel then refuses to open.
+	ReadPaths []string
+
 	Stdout func(chunk string)
 }
 
@@ -97,6 +107,9 @@ func Run(ctx context.Context, m *manifest.Manifest, opts Options) (*Result, erro
 		if opts.ModelPath != "" {
 			helper = append(helper, "--read", opts.ModelPath)
 		}
+		for _, p := range opts.ReadPaths {
+			helper = append(helper, "--read", p)
+		}
 		argv = append(append(helper, "--"), argv...)
 		sandboxed = true
 	}
@@ -118,6 +131,10 @@ func Run(ctx context.Context, m *manifest.Manifest, opts Options) (*Result, erro
 	if lang := os.Getenv("LANG"); lang != "" {
 		cmd.Env = append(cmd.Env, "LANG="+lang)
 	}
+	// Declared secrets and config come last so a unit's own declarations
+	// win over the fixed defaults above, which is what a unit that declares
+	// a config named HOME would reasonably expect.
+	cmd.Env = append(cmd.Env, opts.Env...)
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
