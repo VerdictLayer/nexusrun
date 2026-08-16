@@ -19,6 +19,16 @@ var (
 const binName = "nexus"
 
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", binName, err)
+		os.Exit(1)
+	}
+}
+
+// newRootCmd assembles the command tree. It is separate from main so a
+// test can build it: cobra panics on a duplicated flag shorthand, which
+// would otherwise be a crash on every invocation rather than a test failure.
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   binName,
 		Short: "Portable AI units — build once, run on any hardware",
@@ -47,11 +57,11 @@ without containers, and picks the fastest accelerator available on each host.`,
 		newModelsCmd(),
 		newLogsCmd(),
 		newServeCmd(),
+		newSecretCmd(),
+		newSessionCmd(),
+		newCheckpointCmd(),
+		newToolsCmd(),
 		newSandboxExecCmd(),
 	)
-
-	if err := root.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", binName, err)
-		os.Exit(1)
-	}
+	return root
 }

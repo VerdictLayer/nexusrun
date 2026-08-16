@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,18 +17,24 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/verdictlayer/nexusrun/internal/agent"
+	"github.com/verdictlayer/nexusrun/internal/automodel"
 	"github.com/verdictlayer/nexusrun/internal/bench"
-	"github.com/verdictlayer/nexusrun/internal/compose"
+	"github.com/verdictlayer/nexusrun/internal/checkpoint"
 	"github.com/verdictlayer/nexusrun/internal/daemon"
 	"github.com/verdictlayer/nexusrun/internal/engine"
 	"github.com/verdictlayer/nexusrun/internal/eval"
 	"github.com/verdictlayer/nexusrun/internal/hardware"
 	"github.com/verdictlayer/nexusrun/internal/manifest"
+	"github.com/verdictlayer/nexusrun/internal/mcp"
 	"github.com/verdictlayer/nexusrun/internal/runner"
 	"github.com/verdictlayer/nexusrun/internal/sandbox"
+	"github.com/verdictlayer/nexusrun/internal/secrets"
 	"github.com/verdictlayer/nexusrun/internal/server"
+	"github.com/verdictlayer/nexusrun/internal/session"
 	"github.com/verdictlayer/nexusrun/internal/store"
 	"github.com/verdictlayer/nexusrun/internal/unit"
+	"github.com/verdictlayer/nexusrun/internal/workflow"
 )
 
 func logf(format string, args ...any) {
@@ -154,9 +161,10 @@ that runs with no network access — ideal for air-gapped or edge deployment.`,
 // --- run ------------------------------------------------------------------
 
 func newRunCmd() *cobra.Command {
-	var prompt, device, backendName string
-	var maxTokens int
-	var jsonOut, noDaemon, noSandbox bool
+	var prompt, device, backendName, sessionName, restorePath string
+	var maxTokens, maxTurns, trimAt int
+	var jsonOut, noDaemon, noSandbox, autoModel, refreshBench, mcpDebug bool
+	var cacheTTL time.Duration
 	cmd := &cobra.Command{
 		Use:   "run <ref|dir>",
 		Short: "Run a unit on the best available hardware",
@@ -169,13 +177,18 @@ func newRunCmd() *cobra.Command {
 			}
 			ref := args[0]
 
-			// Prefer a running daemon: it already holds the weights. A unit
-			// that declares tools is the exception — the daemon has no
-			// tool-calling path, so asking it would silently produce an
-			// answer from a model that was never offered the tools. The
-			// peek is a manifest read from the local store; errors are
-			// ignored here and reported properly by the path below.
-			if !noDaemon && !unitDeclaresTools(ctx, s, ref) {
+			// Prefer a running daemon: it already holds the weights. Two
+			// kinds of unit are the exception — one declaring tools (the
+			// daemon has no tool-calling path, so asking it would silently
+			// answer from a model never offered the tools) and one whose
+			// model is chosen by measurement (the daemon has no selection
+			// path, and no single model to be warm with). The peek is a
+			// manifest read from the local store; errors are ignored here
+			// and reported properly by the path below.
+			// A session or a restore also has to bypass the daemon: it has
+			// no conversation state, so it would answer the prompt alone
+			// and drop the history the user asked to continue.
+			if !noDaemon && sessionName == "" && restorePath == "" && !unitNeedsDirectRun(ctx, s, ref) {
 				dreq := daemon.RunRequest{
 					Unit: ref, Prompt: prompt, MaxTokens: maxTokens, Device: device,
 				}
@@ -240,6 +253,21 @@ func newRunCmd() *cobra.Command {
 						modelPath = resolved.Path
 					}
 				}
+				// Declared secrets are resolved from the local encrypted
+				// store and injected as environment. A required secret that
+				// is not stored fails here, before the script starts —
+				// an agent that dies mid-request against a third party is
+				// far harder to diagnose.
+				inj, ierr := injectFor(s, m, deviceID)
+				if ierr != nil {
+					return ierr
+				}
+				defer inj.Close()
+				if len(inj.Missing) > 0 {
+					logf("optional secret(s) not stored, continuing without: %s",
+						strings.Join(inj.Missing, ", "))
+				}
+
 				self, _ := os.Executable()
 				res, rerr := runner.Run(ctx, m, runner.Options{
 					WorkDir:   workDir,
@@ -250,6 +278,8 @@ func newRunCmd() *cobra.Command {
 					NoSandbox: noSandbox,
 					SelfExe:   self,
 					HomeDir:   userHomeDir(),
+					Env:       inj.Env,
+					ReadPaths: inj.Files,
 				})
 				if res != nil {
 					fmt.Print(res.Output)
@@ -262,22 +292,57 @@ func newRunCmd() *cobra.Command {
 			}
 			mod := m.Models[0]
 
-			modelPath, ok := sealed[mod.ID]
-			if !ok {
-				resolved, err := s.Resolve(mod.Source, mod.SHA256, nil)
-				if err != nil {
-					return err
-				}
-				modelPath = resolved.Path
-				if resolved.Shared {
-					logf("using existing model at %s", resolved.Path)
-				}
-			}
-
+			// The hardware preference is settled before the model, because
+			// auto-selection has to measure candidates on the device the
+			// unit will actually run on.
 			hw := hardware.Detect()
 			prefer := m.Hardware.Prefer
 			if device != "" {
 				prefer = []string{device}
+			}
+
+			// modelSource and modelContext may be decided by measurement
+			// rather than read from the manifest, so everything downstream
+			// reads them instead of mod.Source / mod.Context.
+			modelSource, modelContext := mod.Source, mod.Context
+
+			var modelPath string
+			switch {
+			case mod.Auto():
+				dec, derr := selectAutoModel(ctx, s, m, mod, srcDir, ref, prefer, autoModelOpts{
+					refresh: refreshBench, ttl: cacheTTL,
+				})
+				if derr != nil {
+					return derr
+				}
+				if !jsonOut {
+					fmt.Fprint(os.Stderr, "\n"+dec.String()+"\n")
+				}
+				modelPath, modelSource = dec.Path, dec.Source
+				if dec.Context > 0 {
+					modelContext = dec.Context
+				}
+
+			case autoModel:
+				// The flag was given but the unit names its model outright.
+				// Silently ignoring it would leave the user believing a
+				// selection happened.
+				return fmt.Errorf(
+					"--auto-model needs a model entry with candidates, but %s names %s directly — see docs/AUTOMODEL.md",
+					m.Ref(), mod.Source)
+
+			default:
+				var ok bool
+				if modelPath, ok = sealed[mod.ID]; !ok {
+					resolved, rerr := s.Resolve(mod.Source, mod.SHA256, nil)
+					if rerr != nil {
+						return rerr
+					}
+					modelPath = resolved.Path
+					if resolved.Shared {
+						logf("using existing model at %s", resolved.Path)
+					}
+				}
 			}
 
 			// A unit that declares tools is scheduled over the smaller set
@@ -285,9 +350,18 @@ func newRunCmd() *cobra.Command {
 			// and hoping would land on llama-cli, which would generate a
 			// perfectly fluent answer having never been told the tools
 			// exist — the failure this whole path is arranged to prevent.
+			// Tools reach the model from two places — the unit's own and
+			// whatever its MCP servers offer — and either one needs a
+			// backend that can carry tool calls. A session needs the same
+			// smaller set for a different reason: it is a conversation, and
+			// the one-shot CLI can express a single turn.
 			candidates := engine.All()
-			if len(m.Tools) > 0 {
+			switch {
+			case len(m.Tools) > 0 || len(m.MCPServers) > 0:
 				candidates = engine.ToolCapable()
+				defer engine.ShutdownAll(candidates)
+			case sessionName != "" || restorePath != "":
+				candidates = engine.Conversational()
 				defer engine.ShutdownAll(candidates)
 			}
 			if backendName != "" {
@@ -313,24 +387,59 @@ func newRunCmd() *cobra.Command {
 
 			b, chosen, err := engine.SelectFrom(candidates, hw, prefer)
 			if err != nil {
-				if len(m.Tools) > 0 {
-					return fmt.Errorf("%s declares %d tool(s), which needs a backend that can carry tool calls: %w",
-						m.Ref(), len(m.Tools), err)
+				if len(m.Tools) > 0 || len(m.MCPServers) > 0 {
+					return fmt.Errorf("%s declares %d tool(s) and %d MCP server(s), which needs a backend that can carry tool calls: %w",
+						m.Ref(), len(m.Tools), len(m.MCPServers), err)
+				}
+				if sessionName != "" || restorePath != "" {
+					return fmt.Errorf("a session is a multi-turn conversation, which needs a backend that can carry one: %w", err)
 				}
 				return err
 			}
 			logf("running %s on %s via %s", m.Ref(), strings.ToUpper(chosen), b.Name())
 
-			tools := toolDefs(m.Tools)
+			// Secrets are resolved before anything is started: an MCP
+			// server usually needs the API token, and a missing required
+			// one should fail here rather than three turns in.
+			inj, err := injectFor(s, m, deviceID)
+			if err != nil {
+				return err
+			}
+			defer inj.Close()
+
+			self, _ := os.Executable()
+
+			// MCP servers come up before the model, so their tools can be
+			// offered in the same list as the unit's own.
+			mcpMgr, err := mcp.Start(ctx, m, mcp.StartOptions{
+				Store: s, WorkDir: srcDir, Env: inj.Env,
+				SelfExe: self, NoSandbox: noSandbox, HomeDir: userHomeDir(),
+				AutoInstall: true, Debug: mcpDebug, Logf: logf,
+			})
+			if err != nil {
+				return err
+			}
+			defer mcpMgr.Close()
+
+			scriptTools := agent.NewScriptTools(m, agent.ScriptOptions{
+				WorkDir: srcDir, HomeDir: userHomeDir(), SelfExe: self,
+				NoSandbox: noSandbox, Env: inj.Env,
+			})
+
+			tools := append(toolDefs(m.Tools), agent.Defs(mcpMgr)...)
 			if len(tools) > 0 {
 				// The candidate set should make this impossible; assert it
 				// anyway, because the failure it guards against is a unit
 				// answering as though it had declared no tools at all.
 				if !b.Probe().SupportsTools {
-					return fmt.Errorf("backend %s cannot carry tool calls, and %s declares %d",
+					return fmt.Errorf("backend %s cannot carry tool calls, and %s offers %d",
 						b.Name(), m.Ref(), len(tools))
 				}
-				logf("offering %d tool(s): %s", len(tools), strings.Join(toolNames(m.Tools), ", "))
+				var names []string
+				for _, t := range tools {
+					names = append(names, t.Name)
+				}
+				logf("offering %d tool(s): %s", len(tools), strings.Join(names, ", "))
 			}
 
 			p := prompt
@@ -342,62 +451,83 @@ func newRunCmd() *cobra.Command {
 				temp = *mod.Temperature
 			}
 
+			// A session makes the run part of a continuing conversation
+			// rather than a one-shot. Without --session or --restore this
+			// is an in-memory session that is never written, so the default
+			// behaviour is unchanged.
+			sess, persist, err := openSession(s, m, sessionName, restorePath, modelSource, srcDir)
+			if err != nil {
+				return err
+			}
+			sess.Backend, sess.Device = b.Name(), chosen
+			sess.Context = modelContext
+			if trimAt > 0 {
+				if dropped := sess.Trim(trimAt); dropped > 0 {
+					logf("trimmed %d message(s) from the start of the session to fit --trim %d", dropped, trimAt)
+				}
+			}
+			if len(sess.Messages) > 0 {
+				logf("resuming %s with %d message(s) of history", sess.Name, len(sess.Messages))
+			}
+			sess.AddUser(p)
+
 			runID := time.Now().UTC().Format("20060102T150405Z") + "-" + sanitize(m.Name)
 			rec := &store.RunRecord{
 				ID: runID, Unit: m.Ref(), Started: time.Now(),
 				Device: chosen, Backend: b.Name(),
 			}
 
-			res, err := b.Generate(ctx, engine.Request{
-				ModelPath:   modelPath,
-				ModelRef:    mod.Source,
-				Prompt:      p,
-				System:      m.Entrypoint.SystemPrompt,
-				MaxTokens:   maxTokens,
-				Temperature: temp,
-				Context:     mod.Context,
-				Device:      chosen,
-				Chat:        m.Entrypoint.Type == "chat",
-				Tools:       tools,
+			res, runErr := agent.Run(ctx, agent.Options{
+				Backend: b,
+				Request: engine.Request{
+					ModelPath:   modelPath,
+					ModelRef:    modelSource,
+					Messages:    sess.Conversation(m.Entrypoint.SystemPrompt),
+					MaxTokens:   maxTokens,
+					Temperature: temp,
+					Context:     modelContext,
+					Device:      chosen,
+					Chat:        true,
+				},
+				Tools:     tools,
+				Executors: []agent.Executor{scriptTools, agent.NewMCPTools(mcpMgr)},
+				MaxTurns:  maxTurns,
 				Stream: func(chunk string) {
 					if !jsonOut {
 						fmt.Print(chunk)
 					}
 				},
+				Progress: logf,
 			})
 			rec.Ended = time.Now()
-			if err != nil {
-				rec.Error = err.Error()
-				rec.ExitCode = 1
-				_ = s.SaveRun(rec)
-				return err
-			}
-			rec.TokensOut = res.TokensOut
-			rec.TokPerSec = res.EvalTPS
 
-			// The model asked to call a tool. Executing one is the next
-			// piece of work; until it exists, say exactly what was asked
-			// for and fail, because a unit whose tool call was dropped has
-			// not done its job and must not report success.
-			var toolErr error
-			if len(res.ToolCalls) > 0 {
-				var summaries []string
-				for _, c := range res.ToolCalls {
-					summaries = append(summaries, c.Summary())
+			// Whatever happened, the turns that did complete belong in the
+			// session: a run that failed on turn three is exactly the one
+			// whose transcript is worth keeping.
+			if res != nil {
+				sess.Messages = append(sess.Messages, res.Messages...)
+				sess.Turns += res.Turns
+				sess.TokensOut += res.TokensOut
+				if persist {
+					if serr := sess.Save(s); serr != nil {
+						logf("warning: could not save session %s: %v", sess.Name, serr)
+					}
 				}
-				toolErr = fmt.Errorf(
-					"the model asked to call %s, but tool execution is not implemented yet — see docs/TOOLS.md",
-					strings.Join(summaries, ", "))
-				rec.Error = toolErr.Error()
+				rec.TokensOut = res.TokensOut
+				rec.TokPerSec = res.EvalTPS
+			}
+			if runErr != nil {
+				rec.Error = runErr.Error()
 				rec.ExitCode = 1
 			}
 			if err := s.SaveRun(rec); err != nil {
 				logf("warning: could not save run record: %v", err)
 			}
-			_ = os.WriteFile(s.LogPath(runID), []byte(res.Text), 0o644)
-
-			if toolErr != nil && !jsonOut {
-				return toolErr
+			if res != nil {
+				_ = os.WriteFile(s.LogPath(runID), []byte(res.Text), 0o644)
+			}
+			if runErr != nil {
+				return runErr
 			}
 
 			if jsonOut {
@@ -405,9 +535,16 @@ func newRunCmd() *cobra.Command {
 				enc.SetIndent("", "  ")
 				return enc.Encode(res)
 			}
-			fmt.Printf("\n\n— %d tokens · %.1f tok/s · %s on %s\n",
+			fmt.Printf("\n\n— %d tokens · %.1f tok/s · %s on %s",
 				res.TokensOut, res.EvalTPS, res.Backend, strings.ToUpper(res.Device))
-			return toolErr
+			if len(res.Steps) > 0 {
+				fmt.Printf(" · %d tool call(s) over %d turn(s)", len(res.Steps), res.Turns)
+			}
+			if persist {
+				fmt.Printf(" · session %s", sess.Name)
+			}
+			fmt.Println()
+			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "prompt to send")
@@ -417,19 +554,197 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON result")
 	cmd.Flags().BoolVar(&noDaemon, "no-daemon", false, "ignore a running daemon and execute directly")
 	cmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "run script units without confinement (trusted units only)")
+	cmd.Flags().BoolVar(&autoModel, "auto-model", false,
+		"require the unit to select its model by measurement (units declaring candidates do this anyway)")
+	cmd.Flags().BoolVar(&refreshBench, "refresh-bench", false,
+		"re-measure candidates instead of trusting the benchmark cache")
+	cmd.Flags().DurationVar(&cacheTTL, "cache-ttl", bench.DefaultTTL, "how long a cached benchmark stays trusted")
+	cmd.Flags().StringVarP(&sessionName, "session", "s", "",
+		"continue a named conversation, remembering it across runs")
+	cmd.Flags().StringVar(&restorePath, "restore", "", "resume from a checkpoint file")
+	cmd.Flags().IntVar(&maxTurns, "max-turns", agent.DefaultMaxTurns,
+		"stop after this many tool-calling turns")
+	cmd.Flags().IntVar(&trimAt, "trim", 0,
+		"before generating, keep only the most recent N messages of the session")
+	cmd.Flags().BoolVar(&mcpDebug, "mcp-debug", false, "log every MCP frame in both directions")
 	return cmd
 }
 
-// unitDeclaresTools reports whether a unit reference or directory declares
-// any tools. It answers false on any error: the caller uses it only to skip
-// an optimisation, and the real load path reports the failure properly.
-func unitDeclaresTools(ctx context.Context, s *store.Store, ref string) bool {
-	if info, err := os.Stat(ref); err == nil && info.IsDir() {
-		m, err := manifest.Load(ref)
-		return err == nil && len(m.Tools) > 0
+// openSession resolves --session and --restore into the conversation this
+// run continues.
+//
+// With neither flag the session is in memory and never written, so a plain
+// `nexus run` behaves exactly as it always did. persist reports whether the
+// session is one the user asked to keep.
+func openSession(s *store.Store, m *manifest.Manifest, name, restorePath, model, srcDir string) (*session.Session, bool, error) {
+	if restorePath != "" {
+		f, err := os.Open(restorePath)
+		if err != nil {
+			return nil, false, err
+		}
+		defer f.Close()
+
+		modelDir := filepath.Join(s.Root, "restored")
+		res, err := checkpoint.Load(f, checkpoint.LoadOptions{ModelDir: modelDir, Progress: logf})
+		if err != nil {
+			return nil, false, err
+		}
+		sess := res.Session
+		logf("restored %s: %d message(s), %d turn(s), saved %s",
+			sess.Name, len(sess.Messages), sess.Turns, res.Manifest.CreatedAt.Local().Format(time.RFC3339))
+
+		// A checkpoint from a different unit still restores — carrying a
+		// transcript to another agent is a legitimate thing to do — but it
+		// is never silent, because the system prompt it was produced under
+		// no longer applies.
+		if sess.Unit != "" && sess.Unit != m.Ref() {
+			logf("warning: this checkpoint was made by %s, and is being resumed on %s", sess.Unit, m.Ref())
+		}
+		if name != "" {
+			if err := session.ValidName(name); err != nil {
+				return nil, false, err
+			}
+			sess.Name = name
+			return sess, true, nil
+		}
+		if sess.Name == "" {
+			sess.Name = "restored"
+		}
+		return sess, false, nil
 	}
-	m, _, err := unit.Resolve(ctx, s, ref)
-	return err == nil && len(m.Tools) > 0
+
+	if name == "" {
+		// Anonymous: a real session object so the code path is identical,
+		// but nothing is written.
+		return session.New("(anonymous)", m.Ref()), false, nil
+	}
+	if err := session.ValidName(name); err != nil {
+		return nil, false, err
+	}
+	sess, err := session.Load(s, name)
+	if err != nil {
+		return nil, false, err
+	}
+	if sess == nil {
+		sess = session.New(name, m.Ref())
+	} else if sess.Unit != m.Ref() {
+		logf("warning: session %s was started by %s, continuing it on %s", name, sess.Unit, m.Ref())
+		sess.Unit = m.Ref()
+	}
+	sess.Model = model
+	sess.System = m.Entrypoint.SystemPrompt
+	return sess, true, nil
+}
+
+// deviceID names this machine for device-scoped secrets. A fleet sets it
+// per device; unset means only globally scoped secrets apply.
+var deviceID = os.Getenv("NEXUS_DEVICE_ID")
+
+// injectFor resolves a unit's declared secrets and config.
+//
+// A unit that declares none never opens the secret store, so no master key
+// is generated for someone who is not using the feature.
+func injectFor(s *store.Store, m *manifest.Manifest, device string) (*secrets.Injection, error) {
+	if len(m.Secrets) == 0 && len(m.Config) == 0 {
+		return &secrets.Injection{}, nil
+	}
+	st, err := secrets.Open(s)
+	if err != nil {
+		return nil, err
+	}
+	return st.Inject(m, secrets.InjectOptions{Device: device})
+}
+
+// autoModelOpts carries the selection knobs shared by `run` and `bench`.
+type autoModelOpts struct {
+	refresh bool
+	dryRun  bool
+	ttl     time.Duration
+}
+
+// selectAutoModel resolves a candidate list to one model on this machine.
+//
+// The unit's own eval suite is what "quality" means, so it is discovered
+// here and handed to the selector. A unit with no suite still selects —
+// on throughput alone — which is why a missing suite is not an error.
+func selectAutoModel(ctx context.Context, s *store.Store, m *manifest.Manifest, mod manifest.Model,
+	srcDir, ref string, prefer []string, opts autoModelOpts) (*automodel.Decision, error) {
+
+	// The unit's own suite is what "quality" means to the selector. A unit
+	// with no suite still selects, on throughput alone — but a suite that
+	// exists and does not parse is a hard error. Degrading to a throughput
+	// ranking there would answer a different question than the one the
+	// unit's requirements asked, and report it as though it were the same.
+	var suite *eval.Suite
+	suitePath := ""
+	if srcDir != "" {
+		if p, derr := eval.Discover(srcDir); derr == nil {
+			loaded, lerr := eval.Load(p)
+			if lerr != nil {
+				return nil, fmt.Errorf("the unit's eval suite could not be loaded, so its model cannot be selected on quality: %w", lerr)
+			}
+			suite, suitePath = loaded, p
+			if rel, rerr := filepath.Rel(srcDir, p); rerr == nil && !strings.HasPrefix(rel, "..") {
+				suitePath = rel
+			}
+		}
+	}
+
+	// The unit digest pins a cached measurement to the exact artifact it
+	// was taken against. An unbuilt directory has none, and its results are
+	// cached without one rather than not at all.
+	unitDigest := ""
+	if info, err := os.Stat(ref); err != nil || !info.IsDir() {
+		unitDigest, _ = unit.Digest(ctx, s, ref)
+	}
+
+	backends, cleanup := evalBackends()
+	defer cleanup()
+
+	return automodel.Select(ctx, automodel.Options{
+		Store:      s,
+		Manifest:   m,
+		Model:      mod,
+		Suite:      suite,
+		SuitePath:  suitePath,
+		UnitDigest: unitDigest,
+		Backends:   backends,
+		Prefer:     prefer,
+		CacheTTL:   opts.ttl,
+		Refresh:    opts.refresh,
+		DryRun:     opts.dryRun,
+		Progress:   logf,
+	})
+}
+
+// unitNeedsDirectRun reports whether a unit must bypass the warm daemon:
+// it declares tools, or it selects its model by measurement. It answers
+// false on any error — the caller uses it only to skip an optimisation,
+// and the real load path reports the failure properly.
+func unitNeedsDirectRun(ctx context.Context, s *store.Store, ref string) bool {
+	var m *manifest.Manifest
+	var err error
+	if info, serr := os.Stat(ref); serr == nil && info.IsDir() {
+		m, err = manifest.Load(ref)
+	} else {
+		m, _, err = unit.Resolve(ctx, s, ref)
+	}
+	if err != nil {
+		return false
+	}
+	// Tools and MCP servers both need the agent loop, which the daemon has
+	// no path for; an auto-selecting model has no single model to be warm
+	// with. Each would otherwise be answered as though it were a plain
+	// one-shot prompt.
+	if len(m.Tools) > 0 || len(m.MCPServers) > 0 {
+		return true
+	}
+	for _, mod := range m.Models {
+		if mod.Auto() {
+			return true
+		}
+	}
+	return false
 }
 
 // toolDefs converts a unit's tool declarations into what the engine offers
@@ -491,109 +806,86 @@ func newSandboxExecCmd() *cobra.Command {
 	return cmd
 }
 
-// --- compose --------------------------------------------------------------
-
-func newComposeCmd() *cobra.Command {
-	var input string
-	var maxTokens int
-	var showStages bool
-	cmd := &cobra.Command{
-		Use:   "compose <unit> <unit> [unit...]",
-		Short: "Chain units into a pipeline, piping each output to the next",
-		Long: `Compose runs units in sequence. The first receives --input; every
-later unit receives the previous unit's output as its prompt.
-
-Example:
-  nexus compose summarizer:0.1.0 translator:0.1.0 --input "$(cat report.txt)"`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			s, err := store.Open()
-			if err != nil {
-				return err
-			}
-
-			// Each stage prefers the daemon (warm weights) and falls back
-			// to direct execution, exactly like `nexus run`.
-			runStage := func(ctx context.Context, ref, prompt string) (string, float64, error) {
-				if res := tryDaemon(ctx, daemon.RunRequest{
-					Unit: ref, Prompt: prompt, MaxTokens: maxTokens,
-				}); res != nil {
-					return res.Text, res.EvalTPS, nil
-				}
-				out, tps, rerr := runUnitDirect(ctx, s, ref, prompt, maxTokens)
-				return out, tps, rerr
-			}
-
-			res, err := compose.Run(ctx, runStage, compose.Options{
-				Units: args, Input: input, Progress: logf,
-			})
-			if res != nil && showStages {
-				fmt.Println()
-				for i, st := range res.Stages {
-					fmt.Printf("── stage %d: %s ──\n%s\n\n", i+1, st.Unit, strings.TrimSpace(st.Output))
-				}
-			}
-			if err != nil {
-				return err
-			}
-			if !showStages {
-				fmt.Println(res.Output)
-			}
-			logf("pipeline finished in %s", res.Took.Round(time.Millisecond))
-			return nil
-		},
-	}
-	cmd.Flags().StringVarP(&input, "input", "i", "", "input for the first unit")
-	cmd.Flags().IntVarP(&maxTokens, "max-tokens", "n", 256, "max tokens per stage")
-	cmd.Flags().BoolVar(&showStages, "stages", false, "print every intermediate output")
-	return cmd
-}
+// --- shared unit execution ------------------------------------------------
 
 // runUnitDirect executes a chat unit without a daemon, returning its text
-// and measured throughput. It is the fallback path for compose stages.
+// and measured throughput. It is the fallback path for pipeline stages.
 func runUnitDirect(ctx context.Context, s *store.Store, ref, prompt string, maxTokens int) (string, float64, error) {
+	res, err := runAgentDirect(ctx, s, workflow.AgentRequest{
+		Unit: ref, Prompt: prompt, MaxTokens: maxTokens,
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	return res.Output, res.TokPerSec, nil
+}
+
+// runAgentDirect executes one chat unit in-process, honouring a workflow
+// agent's overrides: a different model, a different hardware preference,
+// and environment the unit's own scripts may read.
+func runAgentDirect(ctx context.Context, s *store.Store, req workflow.AgentRequest) (*workflow.AgentResult, error) {
 	var m *manifest.Manifest
 	var err error
-	if info, statErr := os.Stat(ref); statErr == nil && info.IsDir() {
-		m, err = manifest.Load(ref)
+	if info, statErr := os.Stat(req.Unit); statErr == nil && info.IsDir() {
+		m, err = manifest.Load(req.Unit)
 	} else {
-		m, _, err = unit.Resolve(ctx, s, ref)
+		m, _, err = unit.Resolve(ctx, s, req.Unit)
 	}
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
 	if len(m.Models) == 0 {
-		return "", 0, fmt.Errorf("unit %s declares no models", m.Ref())
+		return nil, fmt.Errorf("unit %s declares no models", m.Ref())
 	}
 	mod := m.Models[0]
-	resolved, err := s.Resolve(mod.Source, mod.SHA256, nil)
-	if err != nil {
-		return "", 0, err
+
+	// A workflow may substitute the model. That is the point of the field:
+	// the same unit serves as the cheap and the expensive stage in one file.
+	source, sha := mod.Source, mod.SHA256
+	if req.Model != "" {
+		source, sha = req.Model, ""
+	} else if mod.Auto() {
+		return nil, fmt.Errorf(
+			"unit %s selects its model from candidates; give the agent an explicit `model:` in the workflow, or run it with `%s run %s --auto-model`",
+			m.Ref(), binName, req.Unit)
 	}
-	b, device, err := engine.Select(hardware.Detect(), m.Hardware.Prefer)
+
+	resolved, err := s.Resolve(source, sha, nil)
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
+
+	prefer := m.Hardware.Prefer
+	if len(req.Prefer) > 0 {
+		prefer = req.Prefer
+	}
+	b, device, err := engine.Select(hardware.Detect(), prefer)
+	if err != nil {
+		return nil, err
+	}
+
 	temp := 0.7
 	if mod.Temperature != nil {
 		temp = *mod.Temperature
 	}
 	res, err := b.Generate(ctx, engine.Request{
 		ModelPath:   resolved.Path,
-		ModelRef:    mod.Source,
-		Prompt:      prompt,
+		ModelRef:    source,
+		Prompt:      req.Prompt,
 		System:      m.Entrypoint.SystemPrompt,
-		MaxTokens:   maxTokens,
+		MaxTokens:   req.MaxTokens,
 		Temperature: temp,
 		Context:     mod.Context,
 		Device:      device,
 		Chat:        m.Entrypoint.Type == "chat",
 	})
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
-	return res.Text, res.EvalTPS, nil
+	return &workflow.AgentResult{
+		Output: res.Text, TokensOut: res.TokensOut, TokPerSec: res.EvalTPS,
+		Backend: res.Backend, Device: res.Device,
+	}, nil
 }
 
 // --- eval -----------------------------------------------------------------
@@ -1009,7 +1301,16 @@ func newListCmd() *cobra.Command {
 				fmt.Printf("No units yet. Create one:\n  %s init my-agent && %s build my-agent\n", binName, binName)
 				return nil
 			}
+			fmt.Printf("%-28s %-10s %-10s %s\n", "REF", "KIND", "SIZE", "DESCRIPTION")
 			for _, r := range refs {
+				// The store holds both units and workflows. Listing a
+				// workflow as a unit was actively misleading: its config
+				// decodes far enough to print a plausible row.
+				if spec, werr := workflow.Resolve(cmd.Context(), s, r); werr == nil {
+					fmt.Printf("%-28s %-10s %-10s %s\n", r, "workflow",
+						fmt.Sprintf("%d agents", len(spec.Agents)), spec.Description)
+					continue
+				}
 				m, om, err := unit.Resolve(cmd.Context(), s, r)
 				if err != nil {
 					fmt.Printf("%-28s (unreadable)\n", r)
@@ -1019,12 +1320,11 @@ func newListCmd() *cobra.Command {
 				for _, l := range om.Layers {
 					size += l.Size
 				}
-				sealed := om.Annotations[unit.AnnotationSealed] == "true"
 				kind := "linked"
-				if sealed {
+				if om.Annotations[unit.AnnotationSealed] == "true" {
 					kind = "sealed"
 				}
-				fmt.Printf("%-28s %-8s %-10s %s\n", r, kind, humanSize(size), m.Description)
+				fmt.Printf("%-28s %-10s %-10s %s\n", r, kind, humanSize(size), m.Description)
 			}
 			return nil
 		},
@@ -1041,6 +1341,24 @@ func newInspectCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if spec, werr := workflow.Resolve(cmd.Context(), s, args[0]); werr == nil {
+				fmt.Printf("Workflow:    %s\n", spec.Ref())
+				if spec.Description != "" {
+					fmt.Printf("Description: %s\n", spec.Description)
+				}
+				fmt.Printf("State:       %s\nIsolation:   %s\n\nAgents:\n",
+					spec.SharedState.Backend, spec.Network.Isolation)
+				order, _ := spec.Order()
+				for _, name := range order {
+					a := spec.Agents[name]
+					fmt.Printf("  %-16s %s", name, a.Unit)
+					if a.Model != "" {
+						fmt.Printf(" (model: %s)", a.Model)
+					}
+					fmt.Println()
+				}
+				return nil
+			}
 			m, om, err := unit.Resolve(cmd.Context(), s, args[0])
 			if err != nil {
 				return err
@@ -1052,8 +1370,80 @@ func newInspectCmd() *cobra.Command {
 			fmt.Printf("Artifact:    %s\n", om.ArtifactType)
 			fmt.Printf("Prefer:      %s\n\nModels:\n", strings.Join(m.Hardware.Prefer, " → "))
 			for _, mod := range m.Models {
-				fmt.Printf("  %-10s %s (%s)\n", mod.ID, mod.Source, mod.Format)
+				if !mod.Auto() {
+					fmt.Printf("  %-10s %s (%s)\n", mod.ID, mod.Source, mod.Format)
+					continue
+				}
+				// An auto entry has no source to print; what it has is a bar
+				// and a shortlist, and both are what a reader wants to see
+				// before running someone else's unit.
+				fmt.Printf("  %-10s selected on this machine (%s)\n", mod.ID, mod.Strategy())
+				if r := mod.Requirements; r != nil {
+					var bars []string
+					if r.MinContext > 0 {
+						bars = append(bars, fmt.Sprintf("context ≥ %d", r.MinContext))
+					}
+					if r.MaxSizeMB > 0 {
+						bars = append(bars, fmt.Sprintf("≤ %d MB", r.MaxSizeMB))
+					}
+					if r.MinQualityScore > 0 {
+						bars = append(bars, fmt.Sprintf("eval ≥ %d cases", r.MinQualityScore))
+					}
+					if r.ToolCalling != "" {
+						bars = append(bars, "tool calling "+r.ToolCalling)
+					}
+					if len(bars) > 0 {
+						fmt.Printf("  %-10s requires: %s\n", "", strings.Join(bars, ", "))
+					}
+				}
+				for _, c := range mod.Candidates {
+					fmt.Printf("  %-10s   · %s\n", "", c.Source)
+				}
 			}
+			// What an agent will reach for is the part worth reading before
+			// running a stranger's unit. Names only — never a value, and
+			// never whether one happens to be stored on this machine.
+			if len(m.Secrets) > 0 || len(m.Config) > 0 {
+				fmt.Printf("\nNeeds:\n")
+				for _, sec := range m.Secrets {
+					kind := "secret, optional"
+					if sec.Required {
+						kind = "secret, required"
+					}
+					dest := "env " + sec.EnvName()
+					if sec.MountPath != "" {
+						dest = "file " + sec.MountPath
+					}
+					fmt.Printf("  %-24s %-18s → %s\n", sec.Name, kind, dest)
+				}
+				for _, c := range m.Config {
+					fmt.Printf("  %-24s %-18s → env %s\n", c.Name,
+						"config = "+c.Default, c.EnvName())
+				}
+			}
+			if len(m.Tools) > 0 {
+				fmt.Printf("\nTools:\n")
+				for _, t := range m.Tools {
+					fmt.Printf("  %-24s %s\n", t.Name, t.Description)
+					if len(t.Capabilities) > 0 {
+						fmt.Printf("  %-24s   needs: %s\n", "", strings.Join(t.Capabilities, ", "))
+					}
+				}
+			}
+			if len(m.MCPServers) > 0 {
+				fmt.Printf("\nMCP servers:\n")
+				for _, name := range m.MCPNames() {
+					srv := m.MCPServers[name]
+					fmt.Printf("  %-24s %s\n", name, srv.Source)
+					if len(srv.Sandbox.AllowedPaths) > 0 {
+						fmt.Printf("  %-24s   may read: %s\n", "", strings.Join(srv.Sandbox.AllowedPaths, ", "))
+					}
+					if srv.Sandbox.Network {
+						fmt.Printf("  %-24s   network: yes\n", "")
+					}
+				}
+			}
+
 			fmt.Printf("\nLayers:\n")
 			for _, l := range om.Layers {
 				fmt.Printf("  %-52s %-10s %s\n", l.MediaType, humanSize(l.Size), shortDigest(l.Digest.String()))
@@ -1266,16 +1656,25 @@ func newBenchCmd() *cobra.Command {
 	var runs, maxTokens int
 	var jsonOut bool
 	cmd := &cobra.Command{
-		Use:   "bench",
+		Use:   "bench [unit]",
 		Short: "Measure real throughput on every usable device",
 		Long: `Bench runs the same prompt on every backend/device pair this host can
 actually execute on, and reports median tokens/sec.
 
 This is how you answer "is the NPU actually faster than the CPU here?"
-empirically, instead of trusting spec sheets.`,
+empirically, instead of trusting spec sheets.
+
+Given a unit whose model entry declares candidates, bench measures each of
+them against the unit's own eval suite and reports which one this machine
+would select — the same decision ` + "`nexus run`" + ` makes, without running the
+agent. Results are cached per machine, so the run that follows is instant.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				return benchUnit(cmd.Context(), args[0], jsonOut)
+			}
 			if model == "" {
-				return fmt.Errorf("--model is required (a .gguf path or ollama:<name>)")
+				return fmt.Errorf("--model is required (a .gguf path or ollama:<name>), or name a unit to benchmark its candidates")
 			}
 			s, err := store.Open()
 			if err != nil {
@@ -1309,6 +1708,163 @@ empirically, instead of trusting spec sheets.`,
 	cmd.Flags().IntVar(&runs, "runs", 3, "repetitions per device (median reported)")
 	cmd.Flags().IntVarP(&maxTokens, "max-tokens", "n", 64, "tokens to generate per run")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	cmd.AddCommand(newBenchCacheCmd(), newBenchExportCmd())
+	return cmd
+}
+
+// benchUnit measures a unit's model candidates and reports the selection
+// without running the agent.
+func benchUnit(ctx context.Context, ref string, jsonOut bool) error {
+	s, err := store.Open()
+	if err != nil {
+		return err
+	}
+	var m *manifest.Manifest
+	srcDir := ""
+	if info, serr := os.Stat(ref); serr == nil && info.IsDir() {
+		if m, err = manifest.Load(ref); err != nil {
+			return err
+		}
+		srcDir, _ = filepath.Abs(ref)
+	} else {
+		if m, _, err = unit.Resolve(ctx, s, ref); err != nil {
+			return err
+		}
+		tmp, terr := os.MkdirTemp("", "nexus-bench-*")
+		if terr != nil {
+			return terr
+		}
+		defer os.RemoveAll(tmp)
+		if _, err = unit.Unpack(ctx, s, ref, tmp); err != nil {
+			return err
+		}
+		srcDir = tmp
+	}
+
+	var auto *manifest.Model
+	for i := range m.Models {
+		if m.Models[i].Auto() {
+			auto = &m.Models[i]
+			break
+		}
+	}
+	if auto == nil {
+		return fmt.Errorf(
+			"%s names its model directly (%s), so there is nothing to choose between — `%s bench --model %s` measures that one model's throughput",
+			m.Ref(), m.Models[0].Source, binName, m.Models[0].Source)
+	}
+
+	// Benchmarking is measurement, so the cache is written: the whole point
+	// is that the next `nexus run` does not repeat this work.
+	dec, err := selectAutoModel(ctx, s, m, *auto, srcDir, ref, m.Hardware.Prefer, autoModelOpts{})
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(dec)
+	}
+	fmt.Printf("\n%s", dec.String())
+	return nil
+}
+
+func newBenchCacheCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Inspect or clear this machine's benchmark cache",
+	}
+	var jsonOut bool
+	show := &cobra.Command{
+		Use:   "show",
+		Short: "Show cached benchmark results",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			c, err := bench.LoadCache(s)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(c)
+			}
+			fmt.Print(c.String())
+			return nil
+		},
+	}
+	show.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+
+	clear := &cobra.Command{
+		Use:   "clear",
+		Short: "Discard cached benchmark results",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			if err := bench.ClearCache(s); err != nil {
+				return err
+			}
+			fmt.Printf("Cleared %s\n", bench.CachePath(s))
+			return nil
+		},
+	}
+	cmd.AddCommand(show, clear)
+	return cmd
+}
+
+func newBenchExportCmd() *cobra.Command {
+	var format string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export cached benchmark results",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			c, err := bench.LoadCache(s)
+			if err != nil {
+				return err
+			}
+			switch format {
+			case "json":
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(c)
+			case "csv":
+				w := csv.NewWriter(os.Stdout)
+				defer w.Flush()
+				if err := w.Write([]string{
+					"machine_id", "unit", "version", "profile", "model", "backend",
+					"device", "passed", "total", "tok_per_sec", "model_size_bytes", "timestamp",
+				}); err != nil {
+					return err
+				}
+				for _, e := range c.Sorted() {
+					if err := w.Write([]string{
+						c.MachineID, e.Unit, e.Version, e.Profile, e.Model, e.Backend, e.Device,
+						fmt.Sprint(e.Passed), fmt.Sprint(e.Total),
+						fmt.Sprintf("%.3f", e.TokPerSec), fmt.Sprint(e.ModelSizeBytes),
+						e.Timestamp.UTC().Format(time.RFC3339),
+					}); err != nil {
+						return err
+					}
+				}
+				return w.Error()
+			default:
+				return fmt.Errorf("--format must be json or csv, got %q", format)
+			}
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "json", "output format: json or csv")
 	return cmd
 }
 

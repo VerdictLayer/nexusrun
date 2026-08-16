@@ -6,32 +6,55 @@ packaging as an artifact, because the model, the instructions, the tool
 schemas, and the permissions each tool needs become one versioned,
 digest-addressed object instead of four paragraphs of README.
 
-## What works today, and what does not
+## The loop
 
-**Working:** a unit declares tools; they are validated at build time; the
-runtime schedules the unit onto a backend that can carry tool calls; the
-tools are offered to the model; and when the model asks to call one, the
-request is reported exactly as it was made.
+A tool call is a turn the model takes, and a tool result is a turn it is
+answered with. The runtime drives that loop: generate, execute whatever the
+model asked for, feed the results back, generate again, until it answers.
 
 ```
-$ nexus run ./notes-agent -p "Which invoices are mentioned in my notes?"
-using existing model at /usr/share/ollama/.ollama/models/blobs/sha256-667b0c1932bc…
-running notes-agent:0.1.0 on CPU via llama.cpp/server
-offering 1 tool(s): search_notes
-nexus: the model asked to call search_notes({"query":"invoice"}), but tool
-execution is not implemented yet — see docs/TOOLS.md
+$ nexus run ./notes-agent -p "When does the launch window open?"
+running notes-agent:1.0.0 on CPU via llama.cpp/server
+offering 2 tool(s): notes__list_notes, notes__read_note
+  → notes__list_notes({})
+  ✓ notes__list_notes — launch.txt sites.txt
+  → notes__read_note({"name":"launch.txt"})
+  ✓ notes__read_note — The launch window opens on 14 March 2027.
+The launch window opens on 14 March 2027.
+
+— 54 tokens · 7.0 tok/s · llama.cpp/server on CPU · 2 tool call(s) over 3 turn(s)
 ```
 
-**Not working yet:** executing the tool and feeding its result back. That
-is the next piece of work, and it is deliberately separate — the sandboxing
-it needs is the part worth getting right slowly.
+Tools reach the model from two places, and it cannot tell them apart:
 
-Until it lands, a unit that declares tools **fails** when the model calls
-one, with a non-zero exit status. It does not quietly answer as though the
-tools were not there. That distinction is the whole reason this stage is
-shippable: you can already tell whether your schema and description get the
-model to ask for the right tool with the right arguments, which is where
-most of the iteration actually is.
+- **Script tools** — programs inside the unit, declared in `tools:`, run
+  under the unit's sandbox. Documented below.
+- **MCP tools** — from servers declared in `mcp_servers:`. See
+  **[MCP.md](MCP.md)**.
+
+Where a capability comes from is the packaging's business, not the model's.
+
+### What happens when a tool fails
+
+The distinction that matters is between a tool that *ran and refused* and
+one that *could not run*.
+
+| | Example | What happens |
+|---|---|---|
+| Tool-level error | "no such file", non-zero exit, a timeout | Returned to the model, which usually recovers |
+| Execution failure | sandbox denial, dead MCP server | Aborts the run |
+
+A model that invents a tool name is told so, along with the list of what
+actually exists — it is a model error, not a runtime one, and it corrects
+itself more often than not.
+
+### `--max-turns`
+
+The loop is bounded, defaulting to 8. A model that keeps calling tools
+without concluding is the normal failure mode of a small local model given
+a tool it does not understand, and unbounded it burns the machine until
+someone notices. Hitting the limit reports what it was still trying to call,
+so a genuine long task and a loop are distinguishable.
 
 ## Declaring a tool
 
@@ -92,11 +115,10 @@ complete account of what the artifact can reach. That is the list worth
 reading before running a stranger's unit, and it stops being worth reading
 the moment something nested can exceed it.
 
-The intended enforcement, when execution lands, is per call: each tool
-invocation runs as its own process under its own Landlock policy, so a tool
-that never declared `network` cannot open a socket even though the unit as
-a whole may. That is the piece no other agent packaging format has, and it
-is the reason to build the executor carefully rather than quickly.
+Enforcement is per call: each invocation runs as its own process under its
+own Landlock policy, so a tool that never declared `network` cannot open a
+socket even though the unit as a whole may. The narrowing is applied at
+execution, not just checked at build time.
 
 ## Which backends can carry tool calls
 
@@ -136,17 +158,20 @@ emits a call; you find out by trying, which is what the stage above is for.
 
 ## Limits worth knowing
 
-- **Execution is not implemented.** The model's request is reported and the
-  run fails. See the top of this document.
 - **The warm daemon cannot carry tools.** `nexus serve` has no tool path, so
-  `nexus run` bypasses a running daemon for units that declare tools, and
-  the daemon refuses them outright rather than answering without them.
+  `nexus run` bypasses a running daemon for units that declare tools or MCP
+  servers, and the daemon refuses them outright rather than answering
+  without them.
 - **Ollama cannot be selected by `nexus run`,** despite supporting tools
   natively: `run` executes weights by path and Ollama addresses models by
   name. Tool units therefore need `llama-server` today. The tool wire format
   for Ollama is implemented and tested — only the scheduler cannot reach it.
-- **No MCP.** `exec.type` has one value. An `mcp:` type is the natural third
-  after `script`, but a stdio MCP client is a large surface and native
-  script tools should prove the loop first.
-- **One turn.** The engine can carry a full conversation, including tool
-  results, but nothing yet drives more than one turn of it.
+- **`exec.type` has one value.** A script tool is a program in the unit.
+  Anything else an agent should reach belongs behind an MCP server, which is
+  a real protocol rather than a second bespoke one.
+- **Tool calls within a turn run in order, not in parallel.** A model that
+  requests three independent lookups waits for each. That is the right
+  default on the hardware this targets, where the accelerator is already the
+  bottleneck, but it is a ceiling on a genuinely fan-out task.
+- **Whether the model was trained for tool calling is untestable up front.**
+  A model without tool training simply never emits a call.

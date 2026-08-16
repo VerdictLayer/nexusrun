@@ -45,6 +45,14 @@ packaging entirely — the fast inner loop while developing.
 | `--json` | `false` | Emit a JSON result |
 | `--no-daemon` | `false` | Ignore a running daemon, execute directly |
 | `--no-sandbox` | `false` | Run script units unconfined (trusted units only) |
+| `--auto-model` | `false` | Require the unit to select its model by measurement |
+| `--refresh-bench` | `false` | Re-measure candidates instead of trusting the cache |
+| `--cache-ttl` | `168h` | How long a cached benchmark stays trusted |
+| `-s, --session` | — | Continue a named conversation across runs |
+| `--restore` | — | Resume from a checkpoint file |
+| `--trim` | `0` | Keep only the most recent N messages of the session |
+| `--max-turns` | `8` | Stop after this many tool-calling turns |
+| `--mcp-debug` | `false` | Log every MCP frame in both directions |
 
 When `nexus serve` is running, `run` reaches it automatically and skips
 model load; it falls back to direct execution after a 300 ms dial
@@ -52,13 +60,77 @@ timeout, so the daemon is pure upside.
 
 #### `nexus compose <unit> <unit> [unit...]`
 Chain units into a pipeline, piping each output into the next prompt.
-Sequential only — there is no DAG or conditional branching.
+Sequential, no file needed.
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `-i, --input` | — | Input for the first unit |
 | `-n, --max-tokens` | `256` | Max tokens per stage |
 | `--stages` | `false` | Print every intermediate output |
+
+#### `nexus compose up` and friends
+Run a declared workflow: a dependency graph of agents with routing
+conditions, payload transforms, and a shared state bus, from a
+`nexus-compose.yaml`. See **[COMPOSE.md](COMPOSE.md)**.
+
+| Subcommand | Purpose |
+|---|---|
+| `init [dir]` | Scaffold a `nexus-compose.yaml` |
+| `validate [file]` | Check the file, run nothing |
+| `up` | Run the workflow |
+| `down [name]` | Stop a detached run |
+| `ls` | List detached runs |
+| `logs [name]` | Read the state bus |
+| `build` | Package as an OCI artifact |
+| `push` / `pull` | Move it through a registry |
+
+`nexus compose up` flags:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-f, --file` | `nexus-compose.yaml` | Workflow file, directory, or stored reference |
+| `-i, --input` | — | Input delivered to every source agent |
+| `--input-file` | — | Read the input from a file |
+| `-n, --max-tokens` | `256` | Default for agents declaring none |
+| `-d, --detach` | `false` | Run in the background |
+| `--only` | — | Run just these agents and their dependencies (repeatable) |
+| `--stages` | `false` | Print every agent's output |
+| `--json` | `false` | Emit the full result as JSON |
+
+Agents execute one at a time in topological order. A workflow is its own
+OCI artifact type, so `nexus run` refuses one by type rather than
+half-executing it.
+
+### Sessions, state, secrets, and tools
+
+#### `nexus session list|show|remove`
+An agent's continuing conversation, kept across runs. See
+**[CHECKPOINT.md](CHECKPOINT.md)**.
+
+#### `nexus checkpoint save|list|inspect|remove`
+Move a session between machines as a portable `.state.nx`.
+
+| Flag | Applies to | Meaning |
+|---|---|---|
+| `-o, --output` | save | Write here instead of the store (`-` for stdout) |
+| `--encrypt` | save | Seal the archive under `NEXUS_STATE_KEY` |
+| `--seal` | save | Embed the model weights (gigabytes) |
+| `--transcript` | inspect | Also print the conversation |
+
+The KV cache is deliberately not captured; see CHECKPOINT.md for why.
+
+#### `nexus secret set|rotate|list|remove|check|export|import|audit`
+Credentials kept out of the artifact, encrypted per machine and optionally
+scoped per device. See **[SECRETS.md](SECRETS.md)**.
+
+| Flag | Applies to | Meaning |
+|---|---|---|
+| `--device` | set, rotate, remove, check | Scope to one machine |
+| `--file` / `--stdin` | set, rotate | Read the value from a file or stdin |
+| `--expires-in` | set | Expire after a duration |
+
+#### `nexus tools install|update|list|check`
+The MCP servers a unit depends on. See **[MCP.md](MCP.md)**.
 
 ### Distribution
 
@@ -85,7 +157,7 @@ Report detected hardware and which backends can actually use it — the two
 lists separately, plus hardware present but unusable and why. `--json`
 available.
 
-#### `nexus bench`
+#### `nexus bench [unit]`
 Measure real throughput on every usable device. Median of N runs.
 
 | Flag | Default | Meaning |
@@ -98,6 +170,15 @@ Measure real throughput on every usable device. Median of N runs.
 
 Backends with `AcceptsModelPath: false` (Ollama) are excluded — they
 choose their own device, so a per-device sweep would be meaningless.
+
+Given a unit whose model entry declares candidates, `bench` measures each
+against the unit's own eval suite and reports which one this machine would
+select — the same decision `nexus run` makes, without running the agent.
+Results are cached per machine fingerprint. See **[AUTOMODEL.md](AUTOMODEL.md)**.
+
+#### `nexus bench cache show` / `clear`, `nexus bench export`
+Inspect, discard, or export this machine's benchmark cache.
+`export --format` takes `json` (default) or `csv`.
 
 #### `nexus eval <ref|dir>`
 Score a unit against an eval suite and record the score against the
@@ -193,7 +274,7 @@ license: MIT
 
 models:                            # required for chat units
   - id: main                       # default: "main"
-    source: ollama:llama3.1:8b     # required
+    source: ollama:llama3.1:8b     # required, unless candidates are given
     sha256: ""                     # optional integrity pin
     format: gguf                   # gguf (default) | onnx
     context: 8192                  # context window, tokens
@@ -218,6 +299,30 @@ tools:                             # offered to the model; see below
       command: ["python3", "tools/search.py"]
     capabilities: [storage]        # subset of the unit's capabilities
 
+secrets:                           # declared, never carried; see SECRETS.md
+  - name: OPENAI_API_KEY
+    required: true
+  - name: SSL_CERT
+    required: false
+    env: CERT_PATH                 # variable to inject as; default is name
+    mount_path: /etc/certs/ssl.pem # write to a file instead of a variable
+
+config:                            # non-secret settings with defaults
+  - name: MAX_RETRIES
+    default: "3"
+    env: MAX_RETRIES
+
+mcp_servers:                       # external tool servers; see MCP.md
+  filesystem:
+    source: github:org/repo#<sha>/src/filesystem
+    command: ["node", "dist/index.js", "/projects"]
+    env: {ALLOWED_EXTENSIONS: ".go,.md"}
+    tools: [read_file]             # narrow what is offered to the model
+    timeout: 30s
+    sandbox:
+      allowed_paths: ["/projects"] # absolute
+      network: false               # cannot exceed the unit's capabilities
+
 capabilities: [network]            # sandbox grants; see below
 hardware:
   prefer: [npu, gpu, cpu]          # ordered; first *usable* one wins
@@ -227,6 +332,82 @@ hardware:
 **Unknown fields are rejected**, so a typo fails the build instead of
 silently doing nothing. The corollary is that a unit using a newly added
 field will not parse on older `nexus` binaries.
+
+### Auto-selected models
+
+A model entry may declare *what kind* of model it needs instead of naming
+one. It must be one shape or the other, never both.
+
+```yaml
+models:
+  - id: main
+    profile: default               # cache key; default "default"
+    context: 8192
+    requirements:
+      min_context: 8192
+      tool_calling: required       # required | preferred | none
+      max_size_mb: 3000
+      min_quality_score: 11        # eval cases that must pass
+    candidates:
+      - source: ollama:phi3:3.8b
+        weight: 1.0                # tiebreaker preference, not a scale weight
+        context: 4096              # optional per-candidate override
+        sha256: ""
+      - source: ollama:llama3.1:8b
+        weight: 0.9
+    selection_strategy: best_eval_score
+```
+
+`selection_strategy` is `best_eval_score` (default), `fastest_passing`, or
+`smallest_passing`. The latter two require `min_quality_score` — without a
+bar every candidate passes and the choice would ignore quality entirely.
+
+See **[AUTOMODEL.md](AUTOMODEL.md)**.
+
+---
+
+## Workflow schema
+
+`nexus-compose.yaml`, API version `nexusrun.dev/v1`, kind `Workflow`.
+Documented in full in **[COMPOSE.md](COMPOSE.md)**.
+
+```yaml
+apiVersion: nexusrun.dev/v1
+kind: Workflow
+name: content-pipeline
+version: 1.0.0
+
+agents:
+  researcher:
+    unit: ghcr.io/acme/researcher:v1.2.0
+    model: ollama:llama3.1:8b      # override the unit's own
+    hardware: {prefer: [gpu, cpu]}
+    depends_on: []
+    env: {MAX_DEPTH: "3"}
+    max_tokens: 400
+    restart: 2
+    max_memory_mb: 4096
+    max_cpu_percent: 80
+
+routing:
+  - from: researcher
+    to: writer
+    condition: "len(researcher.output) > 200"
+    transform: "{{ summarize 2000 .researcher.output }}"
+
+shared_state:
+  backend: file                    # memory (default) | file
+  path: ./.nexus/state.jsonl
+  encryption: aes256-gcm           # optional; needs NEXUS_STATE_KEY
+
+network:
+  isolation: process               # process (default) | namespace | none
+  allow_loopback: true
+```
+
+`backend: sqlite` is rejected with an explanation: every pure-Go driver is
+larger than this binary and the cgo ones break static cross-compilation to
+32-bit ARM.
 
 ### Model sources
 
@@ -273,11 +454,19 @@ Tool calling requires a backend with a chat-completions endpoint —
 A unit declaring tools is scheduled over that smaller candidate set, and
 fails with the reason if nothing on the host qualifies.
 
-**Execution is not implemented yet.** Tools are validated, offered to the
-model, and the model's request is reported — then the run fails rather than
-answering as though the tools were absent. See **[TOOLS.md](TOOLS.md)** for
-the full picture, including the `--jinja` requirement and why the warm
-daemon refuses tool units.
+The runtime drives the full loop: generate, execute what the model asked
+for, feed the results back, generate again, bounded by `--max-turns`
+(default 8). A tool that runs and refuses is returned to the model, which
+usually recovers; a sandbox denial or a dead MCP server aborts the run.
+
+Each invocation is its own process under its own Landlock policy, so a
+tool's capability narrowing is enforced at execution and not merely checked
+at build time.
+
+Tools reach the model from two places it cannot distinguish: the unit's own
+`tools:`, and whatever its `mcp_servers:` offer. See **[TOOLS.md](TOOLS.md)**
+and **[MCP.md](MCP.md)**, including the `--jinja` requirement and why the
+warm daemon refuses tool units.
 
 ### Hardware preference
 
@@ -298,6 +487,10 @@ usable, the first available backend's most capable device is used — and
 | `NEXUSRUN_LLAMA_CLI` | *(PATH lookup)* | Path to `llama-cli` |
 | `NEXUSRUN_LLAMA_SERVER` | *(PATH lookup)* | Path to `llama-server`, used by the daemon |
 | `NEXUSRUN_ONNXRUNTIME_LIB` | *(standard dirs)* | Path to the ONNX Runtime shared library |
+| `NEXUS_STATE_KEY` | — | Passphrase for an encrypted workflow state bus and for `checkpoint --encrypt` |
+| `NEXUS_MASTER_KEY` | *(generated file)* | Overrides the on-disk secret-store master key |
+| `NEXUS_BACKUP_KEY` | — | Passphrase for `secret export` / `secret import` |
+| `NEXUS_DEVICE_ID` | — | Names this machine, selecting device-scoped secrets |
 | `NEXUSRUN_REGISTRY_USER` | falls back to `REGISTRY_USER` | Registry username |
 | `NEXUSRUN_REGISTRY_PASSWORD` | falls back to `REGISTRY_PASSWORD`, then `GITHUB_TOKEN` | Registry password or token |
 | `NEXUSRUN_REGISTRY_INSECURE` | unset | Set to exactly `1` to allow plain HTTP to a non-local registry |
@@ -328,7 +521,20 @@ $NEXUSRUN_HOME/            default ~/.nexusrun
   logs/<run-id>.json       run records (RunRecord)
   logs/<run-id>.log        captured stdout/stderr
   evals/<eval-id>.json     saved evaluation reports (eval.Report)
+  cache/benchmarks.json    auto-model benchmark cache, keyed by machine
+  workflows/<name>.json    detached workflow sessions (pid, file, state path)
+  sessions/<name>.json     agent conversations (0600)
+  checkpoints/*.state.nx   saved portable state
+  secrets.json             encrypted secret store (0600)
+  master.key               secret-store master key (0600)
+  audit.log                secret access log, by key name (0600)
+  mcp/<kind>/…             fetched MCP servers, shared across units
+  restored/                weights extracted from a sealed checkpoint
 ```
+
+A workflow's own state bus is **not** here: it lives beside the workflow
+file, at `shared_state.path`, because it belongs to that workflow rather
+than to the machine.
 
 Evaluations live beside runs rather than inside a unit because a score
 belongs to a (unit, model, host) triple, not to the unit alone: the same
@@ -359,7 +565,25 @@ with no server-side support.
 | `dev.nexusrun.sealed` | Whether weights are embedded |
 
 An unsealed unit has one source layer and no model layers. `--seal` adds
-one model layer per model and sets the sealed annotation.
+one model layer per model and sets the sealed annotation. Sealing a unit
+whose model entry declares candidates embeds *every* candidate — the
+target machine has to measure them to choose, and an air-gapped device
+cannot fetch what is missing.
+
+A workflow is a **separate** artifact type sharing the same store:
+
+| Constant | Value |
+|---|---|
+| Artifact type | `application/vnd.nexusrun.workflow.v1` |
+| Config | `application/vnd.nexusrun.workflow.config.v1+json` |
+| Compose layer | `application/vnd.nexusrun.workflow.compose.v1+yaml` |
+| `dev.nexusrun.workflow.agents` | Agent count, so a listing need not fetch the config |
+
+Its config decodes into a unit manifest well enough to look plausible —
+same `name`, `version`, and `description` keys — so `nexus run` refuses it
+by artifact type rather than executing it as a unit with no models. Only
+the workflow file is packed; the units it names resolve from the registry
+at run time.
 
 ---
 

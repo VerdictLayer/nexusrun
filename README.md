@@ -86,10 +86,7 @@ untrusted agent scripts confined by the kernel.
 **Poor fit if you** just want to chat with a model locally (use Ollama — this
 sits on top of it and adds nothing for that); need GPU inference verified today
 (implemented but unverified, see Status); need NPU execution (not implemented);
-need agent graphs with branching (composition is a sequential pipeline); or
-need tools that actually run (they are declared, validated, and offered to
-the model, but executing one is not implemented yet — see
-[docs/TOOLS.md](docs/TOOLS.md)).
+or need NPU execution (not implemented).
 
 ---
 
@@ -279,6 +276,13 @@ nexus serve     # → http://127.0.0.1:7717
 # Chain units together
 nexus compose extractor:0.1.0 summarizer:0.1.0 --input "$(cat report.txt)"
 
+# Or declare a real workflow: a graph, with conditions and transforms
+nexus compose init && nexus compose validate
+nexus compose up -i "the Voyager 1 spacecraft" --stages
+
+# Let each machine pick its own model, by measuring them
+nexus bench my-agent:0.1.0        # what would this device choose, and why?
+
 # Does it still work? On every backend this host can use?
 nexus eval my-agent:0.1.0 --all-devices
 nexus eval my-agent:0.1.0 --compare --fail-under 80
@@ -319,11 +323,15 @@ instead of silently doing nothing.
 | `nexus build [dir]` | Package as an OCI artifact (`--seal` to embed weights) |
 | `nexus run <ref\|dir>` | Run on the best device (`--device`, `--backend` to force) |
 | `nexus compose <a> <b> …` | Chain units, piping each output into the next |
+| `nexus compose up` | Run a declared workflow — a graph with conditions, transforms, and a state bus |
 | `nexus list` / `inspect` | Show local units, layers, and manifests |
 | `nexus push` / `pull` | Any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot |
 | `nexus export` / `import` | Portable `.nx` file for sneakernet and air-gap |
 | `nexus doctor` | Hardware vs. backend capability |
-| `nexus bench` | Measure real tok/s per device |
+| `nexus bench [unit]` | Measure real tok/s per device, or pick a unit's model by measuring candidates |
+| `nexus session` / `checkpoint` | Conversations an agent remembers, and moving them between machines |
+| `nexus secret` | Credentials kept out of the artifact, encrypted per machine |
+| `nexus tools` | Install and health-check a unit's MCP servers |
 | `nexus eval` | Score a unit against a suite, per backend and device |
 | `nexus models` | Local models, including reusable Ollama ones |
 | `nexus logs` | Run history and captured output |
@@ -340,8 +348,13 @@ fast inner loop while developing.
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, repo map, how to add a backend or model source, testing |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Every command and flag, the manifest schema, env vars, on-disk and OCI layout |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the system is shaped this way — the design decisions and their trade-offs |
+| [docs/COMPOSE.md](docs/COMPOSE.md) | Multi-agent workflows: the graph, routing conditions, transforms, and the shared state bus |
+| [docs/AUTOMODEL.md](docs/AUTOMODEL.md) | Declaring what kind of model a unit needs and letting each machine measure which one clears the bar |
+| [docs/TOOLS.md](docs/TOOLS.md) | Declaring tools, the agent loop that executes them, and per-tool capability narrowing |
+| [docs/MCP.md](docs/MCP.md) | Declaring MCP servers as versioned, sandboxed dependencies of a unit |
+| [docs/SECRETS.md](docs/SECRETS.md) | Keeping credentials out of the artifact: the encrypted store, device scoping, rotation, audit |
+| [docs/CHECKPOINT.md](docs/CHECKPOINT.md) | Sessions an agent remembers, and moving that state to another machine |
 | [docs/EVAL.md](docs/EVAL.md) | Scoring a unit per backend and device, the suite format, and what the numbers don't cover |
-| [docs/TOOLS.md](docs/TOOLS.md) | Declaring tools, which backends can carry them, per-tool capabilities, and what isn't built yet |
 | [docs/SANDBOXING.md](docs/SANDBOXING.md) | What Landlock enforces, and the limits to read before trusting it |
 | [docs/NPU.md](docs/NPU.md) | Why NPUs need a different stack than GPUs, and how to test one honestly |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Where help is most valuable, and the project's conventions |
@@ -368,6 +381,45 @@ Working and verified end-to-end on Linux:
   home, and outbound TCP are all denied by the kernel, while shell and Python
   units run normally (see [docs/SANDBOXING.md](docs/SANDBOXING.md))
 - **Pipeline composition** — `nexus compose a b c`
+- **Tool execution** — the full agent loop: the model calls a tool, the
+  runtime runs it under the unit's sandbox, feeds the result back, and the
+  model continues. Verified end-to-end with llama3.1:8b through
+  `llama-server`: a script tool converted 37°C to 98.6°F in one call, and an
+  MCP-backed agent chained `list_notes` then `read_note` over three turns to
+  answer from a file it was never shown. A tool that refuses goes back to the
+  model to recover from; a sandbox denial or dead server aborts the run
+  ([docs/TOOLS.md](docs/TOOLS.md))
+- **MCP-native units** — servers declared in the unit like models are:
+  version-pinned, fetched into a shared cache, started under Landlock with
+  only their `allowed_paths` readable, health-checked with a real MCP
+  handshake, and namespaced per server. stdio transport only, deliberately
+  ([docs/MCP.md](docs/MCP.md))
+- **Sessions and checkpoints** — an agent that remembers across runs, and
+  `.state.nx` files that carry that memory to another machine. Verified: a
+  session recalled a fact on a second run, and an encrypted checkpoint
+  restored onto a clean store on which the session had never existed and
+  recalled it again. `--seal` produced a self-contained 4.5 GB file
+  ([docs/CHECKPOINT.md](docs/CHECKPOINT.md))
+- **Secrets** — credentials declared by a unit and kept out of it, AES-256-GCM
+  at rest, per-device scoping, rotation with a grace period, and an audit log
+  that records key names and never values. Verified: injection into a
+  sandboxed script unit including a mounted certificate, device-scoped
+  override, and rotation ([docs/SECRETS.md](docs/SECRETS.md))
+- **Agent Compose** — a `nexus-compose.yaml` graph with routing conditions,
+  `text/template` transforms, per-agent model and hardware overrides, retries,
+  and an append-only state bus. Verified end-to-end with two real units on
+  llama3.1:8b: the condition gated the second stage, the transform reshaped the
+  payload, and the bus recorded every hop with the tokens and device that
+  produced it — including with AES-256-GCM encryption on, where the payload is
+  opaque on disk and the wrong key fails loudly rather than reading empty.
+  Detached runs (`up -d`, `ls`, `logs -f`, `down`) work through a pidfile, with
+  no daemon (see [docs/COMPOSE.md](docs/COMPOSE.md))
+- **Auto-model selection** — a unit declares the bar (context, size, tool
+  calling, eval cases that must pass) and a shortlist; each machine measures
+  which candidate clears it. Verified end-to-end: a 940 MB base model scored
+  0/3 and was rejected, a 4.7 GB instruct model scored 3/3 and was selected,
+  and the cached second run took 40 ms instead of minutes
+  (see [docs/AUTOMODEL.md](docs/AUTOMODEL.md))
 - **Unit evaluation** — `nexus eval` scores a unit against a suite packed
   inside the artifact, keyed to the unit and model digests, and reports per
   backend, device and model. Verified end-to-end on the example unit: the same
@@ -387,13 +439,13 @@ Not done, and not pretended otherwise:
   ever actually run on it. Verifying this needs a CUDA-enabled llama.cpp build.
 - **Sandboxing is Linux-only.** On macOS and Windows, script units refuse to run
   unless `--no-sandbox` is passed.
-- **Tool execution.** Tools are declared in the manifest, validated at build
-  time, offered to the model, and the model's request is reported exactly as
-  it was made — verified with llama3.1:8b through `llama-server`. Executing
-  the tool and feeding its result back is the next piece of work. Until it
-  lands, a unit whose model calls a tool **fails** with a non-zero exit
-  rather than answering as though the tools were absent
-  ([docs/TOOLS.md](docs/TOOLS.md)). No MCP.
+- **Workflow resource limits.** `max_memory_mb` and `max_cpu_percent` parse and
+  validate but are not yet enforced — there are no cgroups or job objects
+  behind them. `network.isolation` is likewise recorded, not applied; agents
+  inherit the process sandbox, not a per-agent one.
+- **Workflow agents run sequentially**, deliberately — two resident models is
+  what the OOM killer stops on the hardware this targets — but that means a
+  wide graph gains nothing from its width.
 - **Eval assertions are mechanical** — substring, regex, JSON shape. There is
   no model-as-judge, deliberately: a judge's own quality varies with the
   quantization and hardware `nexus eval` exists to measure, so it cannot be
