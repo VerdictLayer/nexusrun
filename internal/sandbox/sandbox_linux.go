@@ -54,11 +54,39 @@ func existing(paths ...string) []string {
 	return out
 }
 
+// classify splits paths into directories and regular files.
+//
+// Landlock rules are typed: a directory rule carries directory access
+// rights, and applying those to a regular file is rejected outright with
+// "inconsistent access rights". Anything that cannot be stat'd is dropped
+// for the same reason `existing` exists — a rule naming a nonexistent path
+// fails the whole ruleset.
+func classify(paths []string) (dirs, files []string) {
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			dirs = append(dirs, abs)
+		} else if info.Mode().IsRegular() {
+			files = append(files, abs)
+		}
+	}
+	return dirs, files
+}
+
 // Apply enforces the policy on the current process. It is irreversible,
 // and every child process inherits it.
 func Apply(p Policy) error {
 	roDirs := []string{}
-	rwDirs := []string{}
 
 	// Interpreters and shared libraries must stay readable or nothing
 	// runs at all.
@@ -67,29 +95,26 @@ func Apply(p Policy) error {
 			roDirs = append(roDirs, d)
 		}
 	}
-	for _, d := range p.ReadOnlyPaths {
-		if d == "" {
-			continue
-		}
-		if abs, err := filepath.Abs(d); err == nil {
-			roDirs = append(roDirs, abs)
-		}
-	}
-	for _, d := range p.ReadWritePaths {
-		if d == "" {
-			continue
-		}
-		if abs, err := filepath.Abs(d); err == nil {
-			rwDirs = append(rwDirs, abs)
-		}
-	}
+
+	// A read-only grant is routinely a single file rather than a tree — a
+	// model's weights, or a mounted secret — so each path is classified
+	// instead of being assumed to be a directory.
+	extraRO, roFiles := classify(p.ReadOnlyPaths)
+	roDirs = append(roDirs, extraRO...)
+	rwDirs, rwFiles := classify(p.ReadWritePaths)
 
 	rules := []landlock.Rule{}
 	if len(roDirs) > 0 {
 		rules = append(rules, landlock.RODirs(roDirs...))
 	}
+	if len(roFiles) > 0 {
+		rules = append(rules, landlock.ROFiles(roFiles...))
+	}
 	if len(rwDirs) > 0 {
 		rules = append(rules, landlock.RWDirs(rwDirs...))
+	}
+	if len(rwFiles) > 0 {
+		rules = append(rules, landlock.RWFiles(rwFiles...))
 	}
 
 	// The standard character devices, granted individually rather than by
