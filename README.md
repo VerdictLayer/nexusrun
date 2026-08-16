@@ -7,7 +7,7 @@
 NexusRun packages an AI agent (its model, prompts, tools, and config) into a
 standard **OCI artifact**, then runs it on the fastest accelerator the host can
 actually use. No containers, no Python environment, no daemon. One static
-binary, about 3 MB.
+binary, about 11 MB.
 
 ```bash
 nexus init my-agent              # scaffold a unit
