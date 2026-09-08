@@ -321,6 +321,7 @@ instead of silently doing nothing.
 |---|---|
 | `nexus init [dir]` | Scaffold a new unit |
 | `nexus build [dir]` | Package as an OCI artifact (`--seal` to embed weights) |
+| `nexus install <ref\|dir>` | Guided model, runtime, hardware, tool, secret, and acceptance-test setup |
 | `nexus run <ref\|dir>` | Run on the best device (`--device`, `--backend` to force) |
 | `nexus compose <a> <b> …` | Chain units, piping each output into the next |
 | `nexus compose up` | Run a declared workflow — a graph with conditions, transforms, and a state bus |

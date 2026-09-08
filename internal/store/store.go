@@ -5,6 +5,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -78,6 +79,82 @@ type ResolvedModel struct {
 
 // Progress reports download progress. It may be nil.
 type Progress func(done, total int64)
+
+// Cached resolves a model only when it is already available locally. It is
+// the read-only half of Resolve, used by installation preflight so merely
+// opening the console never starts a multi-gigabyte download.
+func (s *Store) Cached(source, wantDigest string) (*ResolvedModel, bool) {
+	switch {
+	case strings.HasPrefix(source, "ollama:"):
+		m, err := resolveOllama(strings.TrimPrefix(source, "ollama:"))
+		return m, err == nil
+	case strings.HasPrefix(source, "hf:"), strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
+		digest := wantDigest
+		if digest == "" {
+			digest = s.cachedDigest(source)
+		}
+		if digest == "" {
+			return nil, false
+		}
+		info, err := os.Stat(s.BlobPath(digest))
+		if err != nil {
+			return nil, false
+		}
+		return &ResolvedModel{Path: s.BlobPath(digest), Digest: digest, Size: info.Size(), Source: source}, true
+	default:
+		abs, err := filepath.Abs(source)
+		if err != nil {
+			return nil, false
+		}
+		info, err := os.Stat(abs)
+		if err != nil || info.IsDir() {
+			return nil, false
+		}
+		return &ResolvedModel{Path: abs, Size: info.Size(), Source: source, Shared: true}, true
+	}
+}
+
+// DownloadSize asks the model origin for its byte size without downloading
+// the body. A zero size means the origin did not advertise one. Callers can
+// fall back to a size declared in nexus.yaml.
+func (s *Store) DownloadSize(ctx context.Context, source string) (int64, error) {
+	var rawURL string
+	isHF := false
+	switch {
+	case strings.HasPrefix(source, "hf:"):
+		isHF = true
+		var err error
+		rawURL, err = hfResolveURL(strings.TrimPrefix(source, "hf:"))
+		if err != nil {
+			return 0, err
+		}
+	case strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
+		rawURL = source
+	default:
+		if m, ok := s.Cached(source, ""); ok {
+			return m.Size, nil
+		}
+		return 0, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	if isHF {
+		for k, v := range hfHeaders() {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return 0, fmt.Errorf("inspect %s: %s", source, resp.Status)
+	}
+	return resp.ContentLength, nil
+}
 
 // Resolve turns a manifest model source into a local file path,
 // downloading it if necessary. Supported schemes:

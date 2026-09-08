@@ -231,6 +231,10 @@ func (l *LlamaCPP) binary() string {
 			return p
 		}
 	}
+	if p := managedRuntimeBinary("cli"); p != "" {
+		l.bin = p
+		return p
+	}
 	// Common manual-install locations.
 	home, _ := os.UserHomeDir()
 	for _, p := range []string{
@@ -244,6 +248,42 @@ func (l *LlamaCPP) binary() string {
 		}
 	}
 	return ""
+}
+
+// managedRuntimeBinary finds a runtime installed by `nexus install` without
+// requiring the user to modify PATH. The metadata contains paths only, never
+// executable content, and Probe still verifies the returned file exists.
+func managedRuntimeBinary(kind string) string {
+	root := os.Getenv("NEXUSRUN_HOME")
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		root = filepath.Join(home, ".nexusrun")
+	}
+	data, err := os.ReadFile(filepath.Join(root, "runtimes", "llama.cpp", "current.json"))
+	if err != nil {
+		return ""
+	}
+	var current struct {
+		CLI    string `json:"cli"`
+		Server string `json:"server"`
+	}
+	if json.Unmarshal(data, &current) != nil {
+		return ""
+	}
+	p := current.CLI
+	if kind == "server" {
+		p = current.Server
+	}
+	if p == "" {
+		return ""
+	}
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 var reListDevice = regexp.MustCompile(`^\s{2,}(\S+):\s*(.+)$`)

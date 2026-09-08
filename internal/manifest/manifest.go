@@ -40,6 +40,9 @@ type Model struct {
 	Source string `yaml:"source,omitempty"` // https://…, hf:org/repo/file.gguf, ollama:name:tag, or local path
 	SHA256 string `yaml:"sha256,omitempty"` // optional integrity pin
 	Format string `yaml:"format,omitempty"` // gguf (default), onnx
+	// SizeBytes lets an installer show the approval prompt without relying
+	// on a network HEAD request (some model registries do not support one).
+	SizeBytes int64 `yaml:"size_bytes,omitempty"`
 
 	Context     int      `yaml:"context,omitempty"`     // context window tokens
 	Temperature *float64 `yaml:"temperature,omitempty"` // sampling temperature
@@ -90,7 +93,8 @@ type Requirements struct {
 
 // Candidate is one model auto-selection may choose.
 type Candidate struct {
-	Source string `yaml:"source"`
+	Source    string `yaml:"source"`
+	SizeBytes int64  `yaml:"size_bytes,omitempty"`
 
 	// Weight is an author's prior, applied to the eval score as a
 	// tiebreaker preference. It expresses "these are equivalent on paper,
@@ -137,6 +141,26 @@ type Hardware struct {
 	// Default: [npu, gpu, cpu] — accelerate when possible.
 	Prefer      []string `yaml:"prefer,omitempty"`
 	MinMemoryGB float64  `yaml:"min_memory_gb,omitempty"`
+}
+
+// Installation declares what must travel in an offline export. Online
+// installs may use NexusRun's tested runtime catalog; an air-gapped target
+// instead needs the pinned runtime already inside the unit source tree.
+type Installation struct {
+	Targets []InstallTarget `yaml:"targets,omitempty"`
+	Runtime *RuntimeBundle  `yaml:"runtime,omitempty"`
+}
+
+type InstallTarget struct {
+	OS     string `yaml:"os"`
+	Arch   string `yaml:"arch"`
+	Device string `yaml:"device,omitempty"`
+}
+
+type RuntimeBundle struct {
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
+	Path    string `yaml:"path"`
 }
 
 // Tool is one tool the unit's model may invoke.
@@ -282,6 +306,7 @@ type Manifest struct {
 	Config       []ConfigRef          `yaml:"config,omitempty"`
 	Capabilities []string             `yaml:"capabilities,omitempty"`
 	Hardware     Hardware             `yaml:"hardware,omitempty"`
+	Installation Installation         `yaml:"installation,omitempty"`
 }
 
 // MCPNames returns server names in a stable order.
@@ -366,6 +391,21 @@ func (m *Manifest) Validate() error {
 			errs = append(errs, fmt.Sprintf("hardware.prefer: unknown accelerator %q", p))
 		}
 	}
+	for i, target := range m.Installation.Targets {
+		if target.OS == "" || target.Arch == "" {
+			errs = append(errs, fmt.Sprintf("installation.targets[%d]: os and arch are required", i))
+		}
+		if target.Device != "" && target.Device != "cpu" && target.Device != "gpu" && target.Device != "npu" {
+			errs = append(errs, fmt.Sprintf("installation.targets[%d]: unknown device %q", i, target.Device))
+		}
+	}
+	if r := m.Installation.Runtime; r != nil {
+		if r.Name == "" || r.Version == "" || r.Path == "" {
+			errs = append(errs, "installation.runtime: name, version and path are required")
+		} else if clean := filepath.Clean(r.Path); filepath.IsAbs(r.Path) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+			errs = append(errs, "installation.runtime.path must stay inside the unit directory")
+		}
+	}
 	for i, c := range m.Capabilities {
 		if !knownCapabilities[c] {
 			errs = append(errs, fmt.Sprintf("capabilities[%d]: unknown capability %q", i, c))
@@ -413,6 +453,9 @@ func (m *Manifest) validateModels() []string {
 		}
 
 		if !mod.Auto() {
+			if mod.SizeBytes < 0 {
+				errs = append(errs, label+": size_bytes cannot be negative")
+			}
 			if mod.Requirements != nil {
 				errs = append(errs, label+": requirements only apply to a model entry with candidates")
 			}
@@ -453,6 +496,9 @@ func validateAutoModel(label string, mod Model) []string {
 		}
 		if c.Context < 0 {
 			errs = append(errs, clabel+": context cannot be negative")
+		}
+		if c.SizeBytes < 0 {
+			errs = append(errs, clabel+": size_bytes cannot be negative")
 		}
 	}
 

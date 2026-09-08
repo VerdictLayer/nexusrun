@@ -62,6 +62,18 @@
     background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
   }
   a { color: var(--accent); }
+  button {
+    border: 1px solid var(--accent); background: var(--accent); color: white;
+    border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit;
+  }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .55; cursor: wait; }
+  .install-list { padding: 14px; display: grid; gap: 10px; }
+  .install-row { border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; }
+  .install-row p { margin: 4px 0 0; }
+  .install-actions { padding: 14px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  label.secret { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
+  label.secret input { padding: 7px 8px; min-width: 220px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
 </style>
 </head>
 <body>
@@ -83,6 +95,11 @@
   <section>
     <h2>Units</h2>
     <div class="panel scroll" id="units-wrap"><table id="units"><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Installation</h2>
+    <div class="panel" id="install"><div class="empty">Choose “Install” beside a unit to check this machine.</div></div>
   </section>
 
   <section>
@@ -139,7 +156,7 @@ async function load() {
     document.getElementById("units-wrap").innerHTML =
       `<div class="empty">No units built yet.<br><code>nexus init my-agent &amp;&amp; nexus build my-agent</code></div>`;
   } else {
-    let u = `<tr><th>Unit</th><th>Packaging</th><th>Size</th><th>Models</th><th>Device preference</th></tr>`;
+    let u = `<tr><th>Unit</th><th>Packaging</th><th>Size</th><th>Models</th><th>Device preference</th><th></th></tr>`;
     for (const x of units) {
       u += `<tr>
         <td class="mono">${esc(x.ref)}${x.description ? `<br><span class="muted" style="font-family:system-ui">${esc(x.description)}</span>` : ""}</td>
@@ -147,6 +164,7 @@ async function load() {
         <td>${size(x.size)}</td>
         <td>${x.models}</td>
         <td class="mono muted">${esc(x.prefer)}</td>
+        <td><button class="secondary" onclick="showInstall('${esc(x.ref)}').catch(showInstallError)">Install</button></td>
       </tr>`;
     }
     document.querySelector("#units tbody").innerHTML = u;
@@ -170,6 +188,62 @@ async function load() {
     }
     document.querySelector("#runs tbody").innerHTML = r;
   }
+}
+
+const statusLabel = {ready:"READY", action_required:"ACTION", blocked:"BLOCKED", pending:"PENDING", passed:"PASSED", failed:"FAILED", skipped:"SKIP"};
+const statusClass = s => (s === "ready" || s === "passed") ? "ok" : (s === "blocked" || s === "failed" || s === "action_required") ? "warn" : "off";
+let installPlan = null;
+
+async function showInstall(ref) {
+  const box = document.getElementById("install");
+  box.innerHTML = '<div class="empty">Checking models, runtime, hardware, tools, and secrets…</div>';
+  const res = await fetch("/api/install?unit=" + encodeURIComponent(ref));
+  const plan = await res.json();
+  if (!res.ok) throw new Error(plan.error || "installation check failed");
+  installPlan = plan; renderInstall(plan);
+}
+
+function renderInstall(plan) {
+  const box = document.getElementById("install");
+  let html = `<div class="install-list"><div><strong class="mono">${esc(plan.unit)}</strong>${plan.complete ? ' <span class="pill ok">COMPLETE</span>' : ''}</div>`;
+  for (const c of plan.checks) {
+    html += `<div class="install-row"><span class="pill ${statusClass(c.status)}">${esc(statusLabel[c.status] || c.status)}</span> <strong>${esc(c.summary)}</strong>${c.size_bytes ? ` <span class="muted">(${size(c.size_bytes)})</span>` : ""}`;
+    if (c.detail) html += `<p class="muted">${esc(c.detail)}</p>`;
+    if (c.command) html += `<p><code>${esc(c.command)}</code></p>`;
+    html += `</div>`;
+  }
+  if (plan.tested_configuration) {
+    const c = plan.tested_configuration;
+    html += `<div class="install-row"><strong>Tested configuration</strong><p class="muted">${esc(c.backend)}/${esc(c.device)}, context ${c.context}; ${size(c.memory_available_mb*1024*1024)} available, about ${size(c.memory_required_mb*1024*1024)} required.</p></div>`;
+  }
+  if (plan.acceptance_tests) {
+    const t = plan.acceptance_tests;
+    html += `<div class="install-row"><span class="pill ${statusClass(t.status)}">${esc(statusLabel[t.status] || t.status)}</span> <strong>Acceptance tests${t.suite ? ": " + esc(t.suite) : ""}</strong>`;
+    if (t.passed || t.failed) html += `<p>${t.passed} passed · ${t.failed} failed</p>`;
+    for (const c of (t.cases || [])) if (c.status !== "pending") html += `<p><span class="pill ${statusClass(c.status)}">${esc(c.status)}</span> ${esc(c.name)}${c.detail ? ": " + esc(c.detail) : ""}</p>`;
+    html += `</div>`;
+  }
+  html += `</div>`;
+  const secrets = plan.checks.filter(c => c.action === "set_secret" && c.status === "action_required");
+  if (!plan.complete) {
+    html += `<div class="install-actions">`;
+    for (const s of secrets) html += `<label class="secret">${esc(s.id.slice(7))}<input type="password" data-secret="${esc(s.id.slice(7))}" autocomplete="off" placeholder="Required secret"></label>`;
+    html += `<button id="apply-install" onclick="applyInstall().catch(showInstallError)">Approve &amp; install</button></div>`;
+  }
+  box.innerHTML = html;
+}
+
+async function applyInstall() {
+  const button = document.getElementById("apply-install"); button.disabled = true; button.textContent = "Installing…";
+  const actions = new Set(installPlan.checks.filter(c => c.status === "action_required").map(c => c.action));
+  const secrets = {}; document.querySelectorAll("[data-secret]").forEach(x => { if (x.value) secrets[x.dataset.secret] = x.value; });
+  const res = await fetch("/api/install", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({unit:installPlan.unit, models:actions.has("download_model"), runtime:actions.has("install_runtime"), tools:actions.has("install_tools"), secrets, run_tests:true})});
+  const plan = await res.json(); if (!res.ok) { button.disabled=false; button.textContent="Retry"; throw new Error(plan.error || "installation failed"); }
+  installPlan = plan; renderInstall(plan);
+}
+
+function showInstallError(e) {
+  document.getElementById("install").innerHTML = `<div class="empty"><span class="warn">${esc(e.message || e)}</span><br>Review the message and retry.</div>`;
 }
 
 load().catch(e => {

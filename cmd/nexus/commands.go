@@ -1505,7 +1505,9 @@ func newPullCmd() *cobra.Command {
 }
 
 func newExportCmd() *cobra.Command {
-	return &cobra.Command{
+	var offline bool
+	var target string
+	cmd := &cobra.Command{
 		Use:   "export <ref> <file.nx>",
 		Short: "Export a unit to a portable file (sneakernet / air-gap)",
 		Args:  cobra.ExactArgs(2),
@@ -1513,6 +1515,11 @@ func newExportCmd() *cobra.Command {
 			s, err := store.Open()
 			if err != nil {
 				return err
+			}
+			if offline {
+				if err := unit.ValidateOffline(cmd.Context(), s, args[0], target); err != nil {
+					return err
+				}
 			}
 			if err := unit.ExportFile(cmd.Context(), s, args[0], args[1]); err != nil {
 				return err
@@ -1522,6 +1529,9 @@ func newExportCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&offline, "offline", false, "require a complete air-gapped package before writing the export")
+	cmd.Flags().StringVar(&target, "target", "", "declared offline target: os/arch[/device]")
+	return cmd
 }
 
 func newImportCmd() *cobra.Command {

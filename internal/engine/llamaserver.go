@@ -59,6 +59,10 @@ func (l *LlamaServer) binary() string {
 		l.bin = p
 		return p
 	}
+	if p := managedRuntimeBinary("server"); p != "" {
+		l.bin = p
+		return p
+	}
 	home, _ := os.UserHomeDir()
 	for _, p := range []string{
 		filepath.Join(home, ".local", "bin", "llama-server"),

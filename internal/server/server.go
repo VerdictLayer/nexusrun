@@ -1,7 +1,6 @@
 // Package server provides the NexusRun web console: a local dashboard
-// for inspecting units, hardware capability, and run history. It is
-// read-only by design — management actions stay in the CLI until there
-// is an auth story worth trusting.
+// for inspecting units, hardware capability, run history, and running the
+// same guided installer as the CLI. Installation actions are loopback-only.
 package server
 
 import (
@@ -21,6 +20,7 @@ import (
 	"github.com/verdictlayer/nexusrun/internal/daemon"
 	"github.com/verdictlayer/nexusrun/internal/engine"
 	"github.com/verdictlayer/nexusrun/internal/hardware"
+	installer "github.com/verdictlayer/nexusrun/internal/install"
 	"github.com/verdictlayer/nexusrun/internal/store"
 	"github.com/verdictlayer/nexusrun/internal/unit"
 )
@@ -131,6 +131,54 @@ func Serve(ctx context.Context, s *store.Store, addr string, pool *daemon.Pool) 
 		writeJSON(w, out)
 	})
 
+	// Installation is intentionally a two-step API: GET computes a read-only
+	// plan, POST performs only the actions the user approved in that plan.
+	mux.HandleFunc("GET /api/install", func(w http.ResponseWriter, r *http.Request) {
+		ref := r.URL.Query().Get("unit")
+		if ref == "" {
+			http.Error(w, "unit is required", http.StatusBadRequest)
+			return
+		}
+		plan, err := installer.Inspect(r.Context(), s, ref, installer.Options{InspectDownloadSizes: true})
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, plan)
+	})
+	mux.HandleFunc("POST /api/install", func(w http.ResponseWriter, r *http.Request) {
+		if !loopbackRequest(r) {
+			http.Error(w, "installation is available only from this machine", http.StatusForbidden)
+			return
+		}
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		var req struct {
+			Unit     string            `json:"unit"`
+			Models   bool              `json:"models"`
+			Runtime  bool              `json:"runtime"`
+			Tools    bool              `json:"tools"`
+			Secrets  map[string]string `json:"secrets"`
+			RunTests bool              `json:"run_tests"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			http.Error(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Unit == "" {
+			http.Error(w, "unit is required", http.StatusBadRequest)
+			return
+		}
+		plan, err := installer.Apply(r.Context(), s, req.Unit, installer.Request{Models: req.Models, Runtime: req.Runtime, Tools: req.Tools, Secrets: req.Secrets, RunTests: req.RunTests})
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, plan)
+	})
+
 	mux.HandleFunc("GET /api/runs", func(w http.ResponseWriter, r *http.Request) {
 		runs, err := s.Runs()
 		if err != nil {
@@ -197,4 +245,13 @@ func writeErr(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+func loopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

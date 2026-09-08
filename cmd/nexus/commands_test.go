@@ -36,6 +36,7 @@ func TestCommandTreeBuilds(t *testing.T) {
 	// Spot-check the subcommands this release adds, so a rename does not
 	// quietly drop one.
 	for _, path := range []string{
+		"install",
 		"compose validate", "compose up", "compose down", "compose logs",
 		"compose build", "compose push", "compose pull", "compose init", "compose list",
 		"bench cache show", "bench cache clear", "bench export",

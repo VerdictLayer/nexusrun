@@ -32,6 +32,25 @@ Package a unit directory into an OCI artifact in the local store.
 Without `--seal` the artifact records the model *source* and stays under
 1 KB; weights are resolved on first run.
 
+#### `nexus install <ref|dir>`
+
+Prepare a unit for its first run. The command shows model and runtime
+download sizes, asks before changing the machine, installs declared MCP
+servers through the existing tools subsystem, reports missing secrets with
+the exact `nexus secret set` command, chooses a configuration that fits the
+detected memory, and runs an included `evals/` suite as acceptance tests.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-y, --yes` | `false` | Approve model, runtime, and tool downloads |
+| `--secret KEY=value` | — | Store a declared secret (repeatable; prefer the secret command's `--stdin` for shell-history safety) |
+| `--no-tests` | `false` | Skip included acceptance tests |
+| `--json` | `false` | Emit a machine-readable plan/result; without `--yes`, do not apply it |
+
+The local console exposes the same plan and actions under **Installation**.
+Opening a plan does not download anything; its approval button performs only
+the actions shown.
+
 #### `nexus run <ref|dir>`
 Run a unit on the best available hardware. A directory argument skips
 packaging entirely — the fast inner loop while developing.
@@ -147,6 +166,17 @@ Write and read a portable OCI image-layout tarball, for sneakernet and
 air-gapped transfer. `.nx` is a container for the same OCI content, not a
 competing format.
 
+`nexus export --offline --target linux/amd64/cpu …` validates before writing
+the file. The artifact must name that target in `installation.targets`, have
+sealed every model, contain its pinned `installation.runtime.path`, and avoid
+host-resolved tool commands or MCP servers. Secret values remain deliberately
+outside the artifact and are configured on the destination.
+
+| Export flag | Default | Meaning |
+|---|---|---|
+| `--offline` | `false` | Refuse an incomplete air-gapped export |
+| `--target` | — | Declared target as `os/arch[/device]`; optional only when exactly one target is declared |
+
 #### `nexus list` / `nexus inspect <ref>`
 Show locally stored units; show one unit's manifest and OCI layers.
 
@@ -237,7 +267,8 @@ Start the web console and warm-model daemon.
 
 ## HTTP API
 
-Served by `nexus serve`. Read-only except `POST /api/run`.
+Served by `nexus serve`. Installation is planned with GET and applied only by
+an explicit loopback POST.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -247,11 +278,13 @@ Served by `nexus serve`. Read-only except `POST /api/run`.
 | `GET` | `/api/runs` | Run history |
 | `GET` | `/api/runs/{id}` | One run's record and output |
 | `GET` | `/api/pool` | Warm-model pool status (only when warming is on) |
+| `GET` | `/api/install?unit=<ref>` | Installation plan; does not download |
 | `POST` | `/api/run` | Execute a unit against a warm model |
+| `POST` | `/api/install` | Apply approved model/runtime/tool/secret actions and run acceptance tests (loopback only) |
 
 **It binds to loopback by default. Do not expose it publicly without
-authentication in front of it — `POST /api/run` executes units by
-design.**
+authentication in front of it — `POST /api/run` executes units by design.
+The installation POST additionally rejects non-loopback clients.**
 
 ---
 
@@ -276,6 +309,7 @@ models:                            # required for chat units
   - id: main                       # default: "main"
     source: ollama:llama3.1:8b     # required, unless candidates are given
     sha256: ""                     # optional integrity pin
+    size_bytes: 4920578048          # optional download-size declaration
     format: gguf                   # gguf (default) | onnx
     context: 8192                  # context window, tokens
     temperature: 0.7               # sampling temperature
@@ -327,6 +361,14 @@ capabilities: [network]            # sandbox grants; see below
 hardware:
   prefer: [npu, gpu, cpu]          # ordered; first *usable* one wins
   min_memory_gb: 8
+
+installation:                      # required only for --offline export
+  targets:
+    - {os: linux, arch: amd64, device: cpu}
+  runtime:
+    name: llama.cpp
+    version: b10695                 # pinned version
+    path: runtimes/linux-amd64      # bundled, unit-relative file/directory
 ```
 
 **Unknown fields are rejected**, so a typo fails the build instead of
