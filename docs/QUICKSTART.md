@@ -118,11 +118,18 @@ export NEXUSRUN_REGISTRY_USER=you
 export NEXUSRUN_REGISTRY_PASSWORD=$GITHUB_TOKEN
 ```
 
-**No network where it's going?** Seal the weights in and carry one file:
+**No network where it's going?** Seal the weights in and carry a `.nx` file
+when the destination already has an engine:
 
 ```bash
 nexus build my-agent --seal -o my-agent.nx
 ```
+
+For a clean destination with no separately installed inference engine, create
+a target-specific deployment with `nexus bundle`. It includes NexusRun, a
+verified managed llama.cpp package, and the sealed agent. See
+[RUNTIME_PACKAGES.md](RUNTIME_PACKAGES.md); `.nx` alone does not contain an
+inference engine.
 
 ---
 

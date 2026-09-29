@@ -15,6 +15,16 @@ import (
 // without contacting a registry or relying on host programs. Secrets are the
 // deliberate exception: declarations travel, values must never enter a unit.
 func ValidateOffline(ctx context.Context, s *store.Store, ref, target string) error {
+	return validateOffline(ctx, s, ref, target, true)
+}
+
+// ValidateOfflineAgent checks the portable agent portion of a deployment
+// bundle. The caller supplies and independently verifies the runtime package.
+func ValidateOfflineAgent(ctx context.Context, s *store.Store, ref, target string) error {
+	return validateOffline(ctx, s, ref, target, false)
+}
+
+func validateOffline(ctx context.Context, s *store.Store, ref, target string, requireEmbeddedRuntime bool) error {
 	m, om, err := Resolve(ctx, s, ref)
 	if err != nil {
 		return err
@@ -65,9 +75,9 @@ func ValidateOffline(ctx context.Context, s *store.Store, ref, target string) er
 	if _, err = Unpack(ctx, s, ref, tmp); err != nil {
 		return err
 	}
-	if r := m.Installation.Runtime; r == nil {
+	if r := m.Installation.Runtime; r == nil && requireEmbeddedRuntime {
 		problems = append(problems, "no pinned installation.runtime bundle is declared")
-	} else {
+	} else if r != nil && requireEmbeddedRuntime {
 		path := filepath.Join(tmp, filepath.FromSlash(r.Path))
 		info, e := os.Stat(path)
 		if e != nil {
@@ -78,6 +88,14 @@ func ValidateOffline(ctx context.Context, s *store.Store, ref, target string) er
 	}
 	for _, name := range m.MCPNames() {
 		problems = append(problems, fmt.Sprintf("MCP server %s (%s) is externally resolved; bundle it as an inline tool for offline export", name, m.MCPServers[name].Source))
+	}
+	if !requireEmbeddedRuntime {
+		if m.Entrypoint.Type != "chat" {
+			problems = append(problems, "the first deployment-bundle profile supports chat entrypoints only")
+		}
+		if len(m.Tools) > 0 {
+			problems = append(problems, "the first deployment-bundle profile does not yet support packaged tools")
+		}
 	}
 	checkCommand := func(label string, argv []string) {
 		if len(argv) == 0 {

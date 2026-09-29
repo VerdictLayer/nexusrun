@@ -45,8 +45,10 @@ models:
 A typical unit is **under 1 KB** because it is metadata, not weights.
 
 **2. Sealed units for air-gapped machines.** When you do need self-containment,
-`nexus build --seal` embeds the weights as OCI layers. `nexus export` writes a
-single file you can carry on a USB stick to a machine with no network.
+`nexus build --seal` embeds the weights as OCI layers. For a clean supported
+host, `nexus bundle` adds the NexusRun executable and a pinned, verified
+llama.cpp runtime so no separate engine installation or network access is
+needed. A sealed `.nx` by itself remains weights plus agent content.
 
 **3. It tells you the truth about your hardware.** Detecting a GPU is not the
 same as being able to use it. See below — this is the interesting part.
@@ -75,18 +77,47 @@ NexusRun is a layer *above* the inference engine, not a replacement for one.
 It delegates generation to llama.cpp or Ollama and concerns itself with
 packaging, distribution, and honest hardware scheduling.
 
+### Complete offline deployments
+
+A sealed `.nx` contains the agent and model weights, but intentionally remains
+separate from platform-specific execution code. For a clean supported host,
+NexusRun can now package both layers into one deployment bundle:
+
+```bash
+nexus runtime import ./llama-linux-amd64.runtime.tar.gz
+nexus bundle my-agent:0.1.0 \
+  --target linux/amd64 \
+  --runtime 'llama.cpp/<version>/linux/amd64/<digest>' \
+  --nexus ./dist/nexus-linux-amd64 \
+  -o my-agent-linux-amd64.tar.gz
+```
+
+The resulting archive contains the NexusRun executable, exact verified
+llama.cpp runtime, sealed `.nx` agent, licenses, bundle manifest, and a
+relocatable `run` launcher. The launcher verifies the runtime before execution,
+uses a bundle-local writable state directory, imports the agent idempotently,
+and runs inference through the managed loopback-only llama-server lifecycle.
+It does not require root, modify PATH, or download an engine or model.
+
+Runtime imports are bounded, staged, integrity-checked, installed atomically,
+and addressed by engine version, target, and payload digest. Local import is an
+explicit trust decision: SHA-256 proves the bytes did not change, not who
+published them. See [Managed runtimes and offline bundles](docs/RUNTIME_PACKAGES.md)
+for the package schema, build procedure, supported first profile, and clean-host
+acceptance test.
+
 ### Should you use it?
 
 **Good fit if you** want to hand someone a complete agent rather than setup
-instructions; need to run on a Raspberry Pi, an air-gapped box, or a
-locked-down laptop where Docker is not an option; are deploying the same agent
+instructions; need to run on an air-gapped box or a locked-down Linux machine
+where Docker is not an option; are deploying the same agent
 across mixed hardware and need to know what each host can actually do; or want
 untrusted agent scripts confined by the kernel.
 
 **Poor fit if you** just want to chat with a model locally (use Ollama — this
-sits on top of it and adds nothing for that); need GPU inference verified today
-(implemented but unverified, see Status); need NPU execution (not implemented);
-or need NPU execution (not implemented).
+sits on top of it and adds nothing for that); need GPU or Raspberry Pi
+execution verified today (both remain unverified, see Status); or need NPU
+execution (not implemented).
 
 ---
 
@@ -377,6 +408,12 @@ Working and verified end-to-end on Linux:
 - **Air-gapped execution** — a `--seal`ed unit exported, imported into an empty
   store, and generated correctly with no Ollama models directory, no reachable
   Ollama server, and a throwaway `HOME`
+- **Managed runtime packages and deployment bundles** — safe explicit import,
+  per-file and aggregate verification, atomic digest-addressed installation,
+  target validation, and a relocatable launcher that carries NexusRun,
+  llama.cpp, sealed weights, metadata, and notices. The synthetic package and
+  bundle tests pass; the complete real clean-host inference gate is still
+  listed below rather than implied by the earlier weights-only test.
 - **Sandboxed script units** — Landlock-enforced, capability-gated. Verified
   from inside the sandbox: writes outside the unit directory, reads of the user
   home, and outbound TCP are all denied by the kernel, while shell and Python
@@ -430,6 +467,12 @@ Working and verified end-to-end on Linux:
 - Benchmarking, run logging, web console
 
 Not done, and not pretended otherwise:
+
+- **Complete-bundle clean-host inference.** The packaging, verification, and
+  launcher path is implemented, but has not yet generated from a real GGUF in
+  a fresh supported host with external networking disabled.
+- **Raspberry Pi execution.** Linux arm64 builds successfully, but no bundle
+  has run on real ARM hardware yet. A cross-build is not runtime verification.
 
 - **NPU execution.** Detection and scheduling are in place; the ONNX Runtime
   backend returns a clear error instead of silently falling back to CPU. See

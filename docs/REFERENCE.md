@@ -153,6 +153,21 @@ The MCP servers a unit depends on. See **[MCP.md](MCP.md)**.
 
 ### Distribution
 
+#### `nexus runtime import|list|inspect|verify|activate`
+
+Manage versioned llama.cpp packages under `$NEXUSRUN_HOME/runtimes`. Import is
+an explicit trust action, verifies every declared file, and installs by payload
+digest. `activate` changes ordinary managed-runtime selection; locked bundle
+launchers use explicit packaged paths and do not silently fall back.
+
+#### `nexus bundle <ref>`
+
+Create a target-specific offline deployment containing a target NexusRun
+binary, exact managed runtime, sealed `.nx` agent, launcher, manifest, and
+notices. Required flags are `--target os/arch`, `--runtime <id>`, and `-o`.
+Use `--nexus` for a cross-target executable. See
+[RUNTIME_PACKAGES.md](RUNTIME_PACKAGES.md).
+
 #### `nexus push <ref> <registry-ref>`
 Push to any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot. No
 NexusRun-specific server support is needed. Credentials come from

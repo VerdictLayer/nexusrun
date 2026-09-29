@@ -364,6 +364,15 @@ func newRunCmd() *cobra.Command {
 				candidates = engine.Conversational()
 				defer engine.ShutdownAll(candidates)
 			}
+			// A locked deployment bundle deliberately requests the managed
+			// llama-server even for a single chat turn. It then uses the same
+			// readiness, loopback binding, diagnostics, cancellation and reaping
+			// lifecycle as sessions and tool-capable runs.
+			if backendName == "llama.cpp/server" {
+				ls := &engine.LlamaServer{}
+				candidates = []engine.Backend{ls}
+				defer ls.Shutdown()
+			}
 			if backendName != "" {
 				var picked []engine.Backend
 				for _, cand := range candidates {
@@ -549,7 +558,7 @@ func newRunCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "prompt to send")
 	cmd.Flags().StringVar(&device, "device", "", "force device: npu, gpu, or cpu")
-	cmd.Flags().StringVar(&backendName, "backend", "", "force backend: llama.cpp, ollama, onnxruntime")
+	cmd.Flags().StringVar(&backendName, "backend", "", "force backend: llama.cpp, llama.cpp/server, ollama, onnxruntime")
 	cmd.Flags().IntVarP(&maxTokens, "max-tokens", "n", 256, "maximum tokens to generate")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON result")
 	cmd.Flags().BoolVar(&noDaemon, "no-daemon", false, "ignore a running daemon and execute directly")

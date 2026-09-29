@@ -13,6 +13,8 @@ internal/manifest/      nexus.yaml schema, parsing, validation
 internal/hardware/      CPU/GPU/NPU detection
 internal/engine/        backend abstraction + capability probing
 internal/unit/          OCI packaging, registry push/pull, export/import
+internal/runtimepkg/    verified, digest-addressed inference runtimes
+internal/bundle/        target-specific complete offline deployments
 internal/store/         content-addressed blobs, model resolution, run records
 internal/bench/         cross-device throughput measurement
 internal/daemon/        warm-model pool (keeps weights resident)
@@ -24,8 +26,9 @@ internal/server/        local web console + daemon HTTP API
 
 Dependencies are deliberately few: `oras-go` (OCI), `cobra` (CLI), `yaml.v3`,
 and `go-landlock` (sandboxing). Everything else is the standard library, and
-CGO is off, so every build is a single static binary — verified by
-cross-compiling all eight targets with `CGO_ENABLED=0`.
+CGO is off for NexusRun, so its executable is static. Managed llama.cpp
+runtimes are separate platform-specific executables with their own declared
+libc and host dependency baseline.
 
 ## Decisions worth explaining
 
@@ -60,8 +63,10 @@ A unit therefore stores a model *source*. On first run the runtime resolves it:
 Downloads are content-addressed and verified against `sha256` when the manifest
 pins one, so the same model shared by many units costs one copy on disk.
 
-`--seal` inverts this for air-gapped deployment: weights become OCI layers and
-the artifact is fully self-contained.
+`--seal` inverts this for weight portability: weights become OCI layers. A
+sealed `.nx` still needs an inference engine. `nexus bundle` combines it with
+a pinned managed runtime and target NexusRun executable for a complete
+supported-host deployment.
 
 ### Capability probing over hardware detection
 

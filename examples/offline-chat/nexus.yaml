@@ -1,0 +1,22 @@
+apiVersion: nexusrun.dev/v1
+name: offline-chat
+version: 0.1.0
+description: Minimal sealed-chat example for the offline bundle smoke test
+license: MIT
+models:
+  - id: main
+    source: ./model.gguf
+    context: 2048
+entrypoint:
+  type: chat
+  system_prompt: Answer briefly and plainly.
+hardware:
+  prefer: [cpu]
+installation:
+  targets:
+    - os: linux
+      arch: amd64
+      device: cpu
+    - os: linux
+      arch: arm64
+      device: cpu

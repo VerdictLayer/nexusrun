@@ -43,6 +43,8 @@ without containers, and picks the fastest accelerator available on each host.`,
 	root.AddCommand(
 		newInitCmd(),
 		newInstallCmd(),
+		newRuntimeCmd(),
+		newBundleCmd(),
 		newBuildCmd(),
 		newRunCmd(),
 		newComposeCmd(),
