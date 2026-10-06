@@ -296,6 +296,10 @@ nexus run my-agent:0.1.0 -p "Explain OCI artifacts in two sentences."
 export NEXUSRUN_REGISTRY_USER=you NEXUSRUN_REGISTRY_PASSWORD=$GITHUB_TOKEN
 nexus push my-agent:0.1.0 ghcr.io/you/my-agent:0.1.0
 
+# Or use the hosted registry: sign in once, from any terminal
+nexus login
+nexus push my-agent:0.1.0 registry.nexusrun.dev/you/my-agent:0.1.0
+
 # Or carry it to an air-gapped machine
 nexus build my-agent --seal -o my-agent.nx
 nexus import my-agent.nx
@@ -357,6 +361,7 @@ instead of silently doing nothing.
 | `nexus compose <a> <b> …` | Chain units, piping each output into the next |
 | `nexus compose up` | Run a declared workflow — a graph with conditions, transforms, and a state bus |
 | `nexus list` / `inspect` | Show local units, layers, and manifests |
+| `nexus login` / `logout` / `whoami` | Sign in to NexusRun Cloud from any terminal (device flow) |
 | `nexus push` / `pull` | Any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot |
 | `nexus export` / `import` | Portable `.nx` file for sneakernet and air-gap |
 | `nexus doctor` | Hardware vs. backend capability |

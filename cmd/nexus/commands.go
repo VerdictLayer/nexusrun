@@ -1471,7 +1471,7 @@ func newPushCmd() *cobra.Command {
 		Long: `Push a unit to an OCI registry such as ghcr.io, Docker Hub, ECR, or Harbor.
 
 Credentials come from NEXUSRUN_REGISTRY_USER / NEXUSRUN_REGISTRY_PASSWORD
-(GITHUB_TOKEN also works for ghcr.io).
+(GITHUB_TOKEN also works for ghcr.io), or from a login made with 'nexus login'.
 
 Example:
   nexus push my-agent:0.1.0 ghcr.io/you/my-agent:0.1.0`,

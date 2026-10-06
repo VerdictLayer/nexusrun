@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -27,6 +28,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
 
+	"github.com/verdictlayer/nexusrun/internal/credentials"
 	"github.com/verdictlayer/nexusrun/internal/manifest"
 	"github.com/verdictlayer/nexusrun/internal/store"
 )
@@ -511,16 +513,35 @@ func isLocalRegistry(host string) bool {
 	return false
 }
 
-// credentialFor reads registry credentials from the environment. Docker
-// config file support is intentionally deferred; env vars work
-// identically in CI and on a Raspberry Pi.
+// credentialFor resolves registry credentials. The environment wins, which
+// keeps CI and containers working unchanged; otherwise a login saved by
+// `nexus login` is used. Docker config file support is intentionally deferred.
 func credentialFor(registry string) auth.Credential {
 	user := firstEnv("NEXUSRUN_REGISTRY_USER", "REGISTRY_USER")
 	pass := firstEnv("NEXUSRUN_REGISTRY_PASSWORD", "REGISTRY_PASSWORD", "GITHUB_TOKEN")
-	if user == "" && pass == "" {
+	if user != "" || pass != "" {
+		return auth.Credential{Username: user, Password: pass}
+	}
+	e, ok, err := credentials.Lookup(registry)
+	if err != nil {
+		warnOnce(fmt.Sprintf("ignoring stored login: %v", err))
 		return auth.EmptyCredential
 	}
-	return auth.Credential{Username: user, Password: pass}
+	if !ok {
+		return auth.EmptyCredential
+	}
+	// The registry authenticates by token; the username is informational.
+	name := e.Org
+	if name == "" {
+		name = "nexus"
+	}
+	return auth.Credential{Username: name, Password: e.Token}
+}
+
+var warned sync.Once
+
+func warnOnce(msg string) {
+	warned.Do(func() { fmt.Fprintln(os.Stderr, "warning:", msg) })
 }
 
 func firstEnv(keys ...string) string {

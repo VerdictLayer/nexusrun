@@ -168,10 +168,26 @@ notices. Required flags are `--target os/arch`, `--runtime <id>`, and `-o`.
 Use `--nexus` for a cross-target executable. See
 [RUNTIME_PACKAGES.md](RUNTIME_PACKAGES.md).
 
+#### `nexus login [registry]` / `nexus logout [registry]` / `nexus whoami [registry]`
+Sign in to a registry that supports the OAuth 2.0 device flow (RFC 8628),
+which includes NexusRun Cloud (`registry.nexusrun.dev`, the default). `login`
+prints a short code and a link; open the link on any device with a browser,
+sign in, choose an organization, and approve. This works on headless machines
+and over SSH. Flags: `--no-browser` prints the link without trying to open
+one, and `--name` sets the device name shown at approval (default `user@host`).
+
+The login is stored in `credentials.json` in the NexusRun home directory, mode
+`0600`; a file readable by other users is ignored with a warning. `push` and
+`pull` use it automatically. `NEXUSRUN_REGISTRY_USER` / `_PASSWORD`, when set,
+always take precedence, so CI is unaffected. `logout` forgets the local login;
+to make the token unusable everywhere, revoke it under Access tokens in the
+dashboard. A plain `member` of an organization receives a pull-only token.
+
 #### `nexus push <ref> <registry-ref>`
 Push to any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot. No
 NexusRun-specific server support is needed. Credentials come from
-`NEXUSRUN_REGISTRY_USER` / `NEXUSRUN_REGISTRY_PASSWORD`.
+`NEXUSRUN_REGISTRY_USER` / `NEXUSRUN_REGISTRY_PASSWORD`, or from a login made
+with `nexus login`.
 
 #### `nexus pull <registry-ref>`
 Pull a unit into the local store.
