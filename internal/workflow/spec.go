@@ -316,7 +316,7 @@ func (s *Spec) validateState() []string {
 	switch s.SharedState.Backend {
 	case "", StateMemory, StateFile:
 	case "sqlite":
-		// The roadmap named SQLite as the default. Every pure-Go SQLite
+		// SQLite is the obvious default. Every pure-Go SQLite
 		// driver is larger than this entire binary, and the cgo ones break
 		// static cross-compilation to the 32-bit ARM targets NexusRun
 		// exists to reach — so the file backend provides what SQLite was

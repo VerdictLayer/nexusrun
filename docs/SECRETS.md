@@ -112,7 +112,7 @@ A plain `set` over an existing key is **not** a rotation: there is no grace
 period and the old value is gone immediately, which is what someone fixing
 a typo means.
 
-> The roadmap wanted hot reload of a running agent. The runtime has no
+> Hot reload of a running agent is not how this works: the runtime has no
 > long-lived agent process to signal — a run resolves secrets at start and
 > exits — so rotation is what actually delivers the property that motivated
 > it: a value can change without a coordinated restart, because the next
@@ -184,8 +184,9 @@ in a public registry. It is **not** a defence against someone who already
 has root on the box — they can read the key.
 
 For that threat model you want the values to come from somewhere the
-machine has to authenticate to. The roadmap sketches `nexus secret sync`
-against AWS Secrets Manager, 1Password, and Vault; that is not implemented.
+machine has to authenticate to. Keep them in a secret manager (AWS Secrets
+Manager, 1Password, Vault) and supply them with `nexus secret set --stdin` at
+deploy time.
 
 ---
 

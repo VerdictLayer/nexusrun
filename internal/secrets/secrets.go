@@ -11,7 +11,7 @@
 // given in package workflow: a pure-Go SQLite driver is larger than this
 // entire binary, and the cgo ones break the static cross-compilation to
 // 32-bit ARM that NexusRun exists to support. The data model below is the
-// roadmap's schema; only the storage engine differs.
+// original schema; only the storage engine differs.
 package secrets
 
 import (

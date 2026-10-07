@@ -14,7 +14,7 @@ import (
 // template engine is entirely in what you hand it, and this hands it a
 // string-manipulation vocabulary and the run's own values.
 //
-// Note this departs from the roadmap's sketch, which wrote pipelines as
+// Note this departs from the original sketch, which wrote pipelines as
 // `{{ researcher.output | summarize(100) }}`. That is not Go template
 // syntax and cannot be made so without writing a second language; the same
 // transform here is `{{ summarize .researcher.output 100 }}`.

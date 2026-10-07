@@ -143,12 +143,13 @@ nexus run my-agent:0.1.0
     └─ record run + output                internal/store → nexus logs / console
 ```
 
-## Known gaps
+## Scope
 
-- NPU execution is detected and scheduled but not implemented.
-- GPU offload is implemented but unverified: the development machine's GPU is
-  detected, but its llama.cpp build has no CUDA compiled in, so no generation
-  has run on it.
+- Offline bundles and CPU inference are verified on Linux x86-64. `nexus doctor`
+  reports whether the installed llama.cpp build can use a detected GPU, and
+  NexusRun never silently falls back to CPU when it cannot.
+- NPUs are detected and scheduled for; the ONNX Runtime backend returns an
+  explicit error rather than falling back.
 - Composition is a sequential pipeline; there is no DAG or conditional branching.
 - Sandboxing is Linux-only (Landlock). macOS and Windows have no implementation,
   and script units refuse to run there without `--no-sandbox`.

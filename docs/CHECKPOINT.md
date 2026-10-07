@@ -111,7 +111,7 @@ is 4.5 GB — so it is never the default, and it logs what it is doing.
 
 ## Why there is no KV cache
 
-The roadmap raised this as an open question. The answer turned out to be no,
+A natural question is whether to carry the KV cache too. The answer is no,
 for two independent reasons:
 
 1. **It is not portable.** llama.cpp's KV cache does not survive a change of

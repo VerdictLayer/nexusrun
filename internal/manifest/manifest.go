@@ -84,7 +84,7 @@ type Requirements struct {
 	MaxSizeMB   int64  `yaml:"max_size_mb,omitempty"`
 
 	// MinQualityScore is the number of eval cases that must pass, out of
-	// the unit's own suite — the roadmap's "11 out of 13". It is a count
+	// the unit's own suite — for example "11 out of 13". It is a count
 	// rather than a percentage because that is the number a suite author
 	// actually reasons about, and the suite travels with the unit, so the
 	// denominator is not ambiguous.

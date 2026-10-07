@@ -75,7 +75,7 @@ type Cache struct {
 
 // CachePath is where benchmark results live.
 //
-// The roadmap wrote ~/.nexus/cache/benchmarks.json; the store actually
+// An earlier layout used ~/.nexus/cache/benchmarks.json; the store actually
 // roots at ~/.nexusrun (or $NEXUSRUN_HOME), and splitting state across two
 // home directories would be a bug the first time someone set that variable.
 func CachePath(s *store.Store) string {

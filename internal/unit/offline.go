@@ -91,10 +91,10 @@ func validateOffline(ctx context.Context, s *store.Store, ref, target string, re
 	}
 	if !requireEmbeddedRuntime {
 		if m.Entrypoint.Type != "chat" {
-			problems = append(problems, "the first deployment-bundle profile supports chat entrypoints only")
+			problems = append(problems, "deployment bundles support chat entrypoints")
 		}
 		if len(m.Tools) > 0 {
-			problems = append(problems, "the first deployment-bundle profile does not yet support packaged tools")
+			problems = append(problems, "deployment bundles support chat agents without packaged tools; remove the tools from this unit to bundle it")
 		}
 	}
 	checkCommand := func(label string, argv []string) {

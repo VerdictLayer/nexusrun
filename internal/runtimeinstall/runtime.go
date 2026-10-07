@@ -35,7 +35,7 @@ type Release struct {
 
 // Recommended returns a release NexusRun has tested for the current target.
 // Deliberately absent combinations are unsupported instead of receiving an
-// unverified best guess.
+// a guess.
 func Recommended(goos, goarch string) (Release, bool) {
 	for _, r := range catalog {
 		if r.OS == goos && r.Arch == goarch {

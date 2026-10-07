@@ -4,9 +4,9 @@ This document explains why NPUs need a different stack than GPUs, what
 NexusRun does about it today, and how to measure whether an NPU is actually
 worth using on a given machine.
 
-**Current status:** NexusRun detects NPUs and schedules for them, but does not
-yet execute on them. The ONNX Runtime backend returns an explicit error rather
-than silently falling back to CPU — a silent fallback would make every
+**How it behaves:** NexusRun detects NPUs and schedules for them. The ONNX
+Runtime backend returns an explicit error rather than silently falling back to
+CPU — a silent fallback would make every
 benchmark and capability claim meaningless.
 
 ---

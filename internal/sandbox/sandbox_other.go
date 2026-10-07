@@ -15,7 +15,7 @@ func Supported() bool { return false }
 
 // Describe returns a human-readable summary of enforcement support.
 func Describe() string {
-	return "unavailable (Landlock is Linux-only; macOS Seatbelt and Windows AppContainer are not implemented)"
+	return "unavailable (the sandbox uses Linux Landlock)"
 }
 
 // Apply always fails on unsupported platforms, so a caller can never

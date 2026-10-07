@@ -262,10 +262,10 @@ reading fails loudly rather than returning empty history.
 
 ### Why not SQLite
 
-The roadmap named SQLite as the default backend. Every pure-Go SQLite
+SQLite is the obvious default backend, but every pure-Go SQLite
 driver is larger than this entire binary, and the cgo ones break static
 cross-compilation to the 32-bit ARM targets NexusRun exists to reach. The
-`file` backend provides what SQLite was wanted for — durable, single-file,
+`file` backend provides what SQLite would — durable, single-file,
 survives a crash — at no size cost. `backend: sqlite` fails validation with
 that explanation rather than being silently accepted.
 

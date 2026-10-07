@@ -5,6 +5,5 @@ Place a small, redistributable GGUF at `model.gguf`, record its SHA-256 in
 weights are intentionally not committed; their redistribution terms must be
 reviewed separately.
 
-This fixture declares Linux amd64 and Linux arm64 CPU targets. Those are build
-targets, not automatic compatibility claims: publish a target only after the
-documented clean-host test succeeds on the actual OS and hardware baseline.
+The fixture's targets are declared in `nexus.yaml`. Publish a bundle for a
+target after the documented clean-host test passes on that OS and hardware.

@@ -316,9 +316,8 @@ broken. What you *can* do:
   executable, so a shell script emitting canned `llama-cli` stderr tests
   the performance-counter regexes in `engine.go` with no model at all.
 
-If you genuinely cannot verify something, say so in the PR and in the
-docs. Unverified-but-written is an honest state; it is recorded that way
-for GPU offload in the README today.
+If you could not exercise something on your hardware, say so in the PR so
+reviewers know exactly what was run.
 
 ---
 

@@ -135,7 +135,7 @@ inherited and cannot be dropped.
 | Field | Effect |
 |---|---|
 | `sandbox.allowed_paths` | Absolute paths the server may read |
-| `sandbox.blocked_paths` | Recorded; **not yet enforced** — Landlock grants, it does not subtract |
+| `sandbox.blocked_paths` | Recorded in the manifest, not applied: Landlock grants access, it cannot subtract |
 | `sandbox.network` | Permit outbound TCP |
 
 A server never gets blanket home-directory access. What it may reach is

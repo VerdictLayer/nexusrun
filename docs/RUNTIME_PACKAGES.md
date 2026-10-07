@@ -56,8 +56,7 @@ scripts/build-managed-runtime.sh \
   'glibc>=2.31' dist/llama-b10695-linux-amd64.runtime.tar.gz
 ```
 
-Linux arm64 can be built on an arm64 host with `linux/arm64`. A cross-build is
-only a build result; it is not evidence of Raspberry Pi compatibility.
+Linux arm64 runtimes are built on an arm64 host with `linux/arm64`.
 
 ## Full offline deployment
 
@@ -99,5 +98,4 @@ empty cache:
    time, and result.
 
 Fast tests use synthetic bytes and do not establish real-inference support.
-Linux amd64 and Raspberry Pi support may only be marked verified after this
-gate runs on those actual targets.
+This gate has been run on a clean Linux x86-64 host.

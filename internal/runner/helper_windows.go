@@ -8,5 +8,5 @@ import "errors"
 // wired up, and exec-replacement semantics differ. Script units must be
 // run with --no-sandbox there, which the caller reports explicitly.
 func RunHelper(opts HelperOptions, argv []string) error {
-	return errors.New("sandboxed execution is not implemented on Windows")
+	return errors.New("sandboxed execution requires Linux")
 }

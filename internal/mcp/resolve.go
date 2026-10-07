@@ -218,7 +218,7 @@ func (s Source) Install(ctx context.Context, st *store.Store, force bool, logf f
 
 	case KindOCI:
 		return fmt.Errorf(
-			"OCI-packaged MCP servers are not implemented yet — use github:, npm:, file:// or exec: for %s", s.Raw)
+			"OCI-packaged MCP servers are not supported; use github:, npm:, file:// or exec: for %s", s.Raw)
 	}
 	return fmt.Errorf("cannot install source kind %q", s.Kind)
 }

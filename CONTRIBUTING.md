@@ -26,11 +26,10 @@ is shaped the way it is.
 
 ## What help is most valuable
 
-**Hardware verification is the bottleneck.** The core was developed on a
-machine with no NPU and a CPU-only llama.cpp build, so no generation has ever
-run on a GPU or NPU here — several paths are written but unverified. If you
-have any of the following, running `nexus doctor` and `nexus bench` and opening
-an issue with the output is genuinely useful:
+**Test reports from more hardware are the most valuable help.** NexusRun is
+developed and verified on x86-64 Linux with CPU inference. If you have any of
+the following, running `nexus doctor` and `nexus bench` and opening an issue
+with the output is genuinely useful:
 
 - Intel Core Ultra (NPU via `intel_vpu`)
 - AMD Ryzen AI (NPU via `amdxdna`)

@@ -48,7 +48,7 @@ artifact, so whoever pulls the unit runs the same cases the author did, on
 their own hardware, against their own weights.
 
 `min_quality_score` is a count of cases that must pass, out of that suite —
-the roadmap's "11 out of 13". A count rather than a percentage because it
+for example "11 out of 13". A count rather than a percentage because it
 is the number a suite author actually reasons about, and the denominator is
 not ambiguous when the suite ships with the unit.
 
@@ -160,10 +160,9 @@ nexus run <unit> --refresh-bench # ignore the cache and re-measure
 nexus run <unit> --cache-ttl 24h
 ```
 
-> The roadmap wrote `~/.nexus/cache/benchmarks.json`. The store actually
-> roots at `~/.nexusrun` (or `$NEXUSRUN_HOME`), and splitting state across
-> two home directories would break the first time someone set that
-> variable.
+> Cached benchmarks live under `~/.nexusrun` (or `$NEXUSRUN_HOME`) with the
+> rest of the store. Splitting state across two home directories would break
+> the first time someone set that variable.
 
 ---
 

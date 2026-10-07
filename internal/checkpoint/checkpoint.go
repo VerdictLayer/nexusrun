@@ -6,9 +6,9 @@
 // half-finished session has to continue on a laptop: the agent picks up
 // where it left off rather than starting over.
 //
-// What is deliberately *not* in here is the KV cache. The roadmap raised it
-// as an open question and the honest answer turned out to be no: llama.cpp's
-// cache is not portable across versions, quantizations, or architectures,
+// What is deliberately *not* in here is the KV cache. It is tempting to carry
+// it, but llama.cpp's cache is not portable across versions, quantizations, or
+// architectures,
 // and this runtime drives backends as subprocesses and HTTP servers, so
 // there is no cache handle to capture in the first place. Restoring a
 // conversation costs one prompt re-ingest on the first turn and is correct

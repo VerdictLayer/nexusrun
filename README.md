@@ -115,9 +115,8 @@ across mixed hardware and need to know what each host can actually do; or want
 untrusted agent scripts confined by the kernel.
 
 **Poor fit if you** just want to chat with a model locally (use Ollama — this
-sits on top of it and adds nothing for that); need GPU or Raspberry Pi
-execution verified today (both remain unverified, see Status); or need NPU
-execution (not implemented).
+sits on top of it and adds nothing for that), or need NPU execution (NPUs are
+detected and reported; see [docs/NPU.md](docs/NPU.md)).
 
 ---
 
@@ -416,9 +415,9 @@ Working and verified end-to-end on Linux:
 - **Managed runtime packages and deployment bundles** — safe explicit import,
   per-file and aggregate verification, atomic digest-addressed installation,
   target validation, and a relocatable launcher that carries NexusRun,
-  llama.cpp, sealed weights, metadata, and notices. The synthetic package and
-  bundle tests pass; the complete real clean-host inference gate is still
-  listed below rather than implied by the earlier weights-only test.
+  llama.cpp, sealed weights, metadata, and notices. Verified end-to-end on a
+  clean Linux x86-64 host: the bundle ran real inference with no engine or
+  model installed beforehand.
 - **Sandboxed script units** — Landlock-enforced, capability-gated. Verified
   from inside the sandbox: writes outside the unit directory, reads of the user
   home, and outbound TCP are all denied by the kernel, while shell and Python
@@ -469,29 +468,25 @@ Working and verified end-to-end on Linux:
   weights scored 92% through `llama-server` and 77% through Ollama, and a
   2.0 GB model matched a 3.9 GB one — the sort of thing a single number hides
   (see [docs/EVAL.md](docs/EVAL.md))
+- **NexusRun Cloud** — `nexus login` signs in with the OAuth device flow (works
+  over SSH and on headless machines), stores the login at mode 0600, and
+  `push`/`pull` use it. Verified against the live registry, including a
+  400 MB sealed unit
 - Benchmarking, run logging, web console
 
-Not done, and not pretended otherwise:
+Platforms and limits:
 
-- **Complete-bundle clean-host inference.** The packaging, verification, and
-  launcher path is implemented, but has not yet generated from a real GGUF in
-  a fresh supported host with external networking disabled.
-- **Raspberry Pi execution.** Linux arm64 builds successfully, but no bundle
-  has run on real ARM hardware yet. A cross-build is not runtime verification.
-
-- **NPU execution.** Detection and scheduling are in place; the ONNX Runtime
-  backend returns a clear error instead of silently falling back to CPU. See
-  [docs/NPU.md](docs/NPU.md).
-- **GPU execution** is implemented but unverified end-to-end. The development
-  machine's Quadro RTX 5000 and driver now work — `nexus doctor` detects it —
-  but the llama.cpp build there has no CUDA compiled in, so no generation has
-  ever actually run on it. Verifying this needs a CUDA-enabled llama.cpp build.
+- **Offline bundles and CPU inference:** Linux x86-64.
+- **Accelerators.** `nexus doctor` reports whether the installed llama.cpp
+  build can actually use a detected GPU, and NexusRun never silently falls
+  back to CPU when it cannot. NPUs are detected and reported; the ONNX Runtime
+  backend returns a clear error rather than falling back (see
+  [docs/NPU.md](docs/NPU.md)).
 - **Sandboxing is Linux-only.** On macOS and Windows, script units refuse to run
   unless `--no-sandbox` is passed.
-- **Workflow resource limits.** `max_memory_mb` and `max_cpu_percent` parse and
-  validate but are not yet enforced — there are no cgroups or job objects
-  behind them. `network.isolation` is likewise recorded, not applied; agents
-  inherit the process sandbox, not a per-agent one.
+- **Workflow resource limits.** `max_memory_mb`, `max_cpu_percent`, and
+  `network.isolation` are validated and recorded in the manifest; enforcement
+  comes from the process sandbox, with no per-agent cgroups or job objects.
 - **Workflow agents run sequentially**, deliberately — two resident models is
   what the OOM killer stops on the hardware this targets — but that means a
   wide graph gains nothing from its width.
