@@ -361,6 +361,7 @@ instead of silently doing nothing.
 | `nexus compose up` | Run a declared workflow — a graph with conditions, transforms, and a state bus |
 | `nexus list` / `inspect` | Show local units, layers, and manifests |
 | `nexus login` / `logout` / `whoami` | Sign in to NexusRun Cloud from any terminal (device flow) |
+| `nexus usage` | Your Cloud plan, storage and monthly bandwidth |
 | `nexus push` / `pull` | Any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot |
 | `nexus export` / `import` | Portable `.nx` file for sneakernet and air-gap |
 | `nexus doctor` | Hardware vs. backend capability |

@@ -1481,6 +1481,9 @@ Example:
 			if err != nil {
 				return err
 			}
+			if err := preflightPush(cmd.Context(), args[1]); err != nil {
+				return err
+			}
 			logf("pushing %s → %s", args[0], args[1])
 			digest, err := unit.Push(cmd.Context(), s, args[0], args[1])
 			if err != nil {

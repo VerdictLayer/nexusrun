@@ -183,11 +183,18 @@ always take precedence, so CI is unaffected. `logout` forgets the local login;
 to make the token unusable everywhere, revoke it under Access tokens in the
 dashboard. A plain `member` of an organization receives a pull-only token.
 
+#### `nexus usage [registry]`
+Show your NexusRun Cloud plan, storage used and free, this month's pull
+bandwidth, and the host limit, for the account you are signed in to. `--json`
+prints the raw report. It uses the stored login (or the registry credentials in
+the environment).
+
 #### `nexus push <ref> <registry-ref>`
 Push to any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot. No
 NexusRun-specific server support is needed. Credentials come from
 `NEXUSRUN_REGISTRY_USER` / `NEXUSRUN_REGISTRY_PASSWORD`, or from a login made
-with `nexus login`.
+with `nexus login`. Pushing to NexusRun Cloud first prints your remaining
+storage, and stops early with a clear message if the account is read-only.
 
 #### `nexus pull <registry-ref>`
 Pull a unit into the local store.

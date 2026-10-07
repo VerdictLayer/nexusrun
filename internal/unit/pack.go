@@ -513,6 +513,10 @@ func isLocalRegistry(host string) bool {
 	return false
 }
 
+// RegistryToken returns the password/token the CLI would present to a
+// registry (environment first, then a stored login), or "" if there is none.
+func RegistryToken(registry string) string { return credentialFor(registry).Password }
+
 // credentialFor resolves registry credentials. The environment wins, which
 // keeps CI and containers working unchanged; otherwise a login saved by
 // `nexus login` is used. Docker config file support is intentionally deferred.
