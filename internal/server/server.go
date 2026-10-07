@@ -208,15 +208,15 @@ func Serve(ctx context.Context, s *store.Store, addr string, pool *daemon.Pool) 
 		w.Write(data)
 	})
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	srv := &http.Server{
+		Addr: addr,
+		// The guard sees the real bound address, which matters when addr asks for port 0.
+		Handler:           guard(mux, ln.Addr().String()),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {

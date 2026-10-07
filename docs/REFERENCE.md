@@ -298,8 +298,19 @@ Start the web console and warm-model daemon.
 
 ## HTTP API
 
-Served by `nexus serve`. Installation is planned with GET and applied only by
+Served by `nexus serve`. Installation is previewed with GET and applied only by
 an explicit loopback POST.
+
+The server listens on `127.0.0.1:7717` by default and protects itself from web
+pages open in your browser, which can otherwise reach loopback services:
+
+- The `Host` header must name the server's own loopback address and port, so a
+  site that re-points its DNS name at `127.0.0.1` is refused.
+- State-changing requests must be `application/json` and same-origin. Requests
+  carrying a cross-site `Origin` or `Sec-Fetch-Site` are refused. `curl` and the
+  `nexus` CLI send neither header, so scripted use is unaffected.
+- No CORS headers are ever sent, and responses carry `X-Frame-Options: DENY`
+  and `X-Content-Type-Options: nosniff`.
 
 | Method | Path | Purpose |
 |---|---|---|
