@@ -8,3 +8,6 @@
 
 # The marketing site lives in its own private repo (nexusrun-site).
 /web/
+
+# Agent/contributor notes stay local.
+/AGENTS.md
