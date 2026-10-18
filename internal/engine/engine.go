@@ -152,16 +152,29 @@ func Select(hw *hardware.Report, prefer []string) (Backend, string, error) {
 // paths can be exercised with stub backends on a machine that has
 // neither, which is otherwise impossible to cover.
 func SelectFrom(candidates []Backend, hw *hardware.Report, prefer []string) (Backend, string, error) {
+	return SelectForModel(candidates, hw, prefer, "")
+}
+
+// SelectForModel also permits name-addressed backends when source names their
+// model store. Pass an empty source for sealed weights or a forced device:
+// a named backend cannot guarantee either the supplied bytes or device placement.
+func SelectForModel(candidates []Backend, hw *hardware.Report, prefer []string, source string) (Backend, string, error) {
 	caps := map[string]Capability{}
 	var backends []Backend
+	var named []Backend
 	for _, b := range candidates {
 		c := b.Probe()
 		caps[b.Name()] = c
 		if c.Available && c.AcceptsModelPath {
 			backends = append(backends, b)
+		} else if c.Available && strings.HasPrefix(source, b.Name()+":") && len(source) > len(b.Name())+1 {
+			named = append(named, b)
 		}
 	}
 	if len(backends) == 0 {
+		if len(named) > 0 {
+			return named[0], "auto", nil
+		}
 		// Iterating candidates rather than the map keeps this order stable;
 		// and an available backend excluded for addressing reasons must say
 		// so, not print a Detail that reads like an endorsement.
@@ -200,6 +213,9 @@ func SelectFrom(candidates []Backend, hw *hardware.Report, prefer []string) (Bac
 				return b, d, nil
 			}
 		}
+	}
+	if len(named) > 0 {
+		return named[0], "auto", nil
 	}
 	var claimed []string
 	for _, b := range backends {

@@ -59,7 +59,7 @@ packaging entirely — the fast inner loop while developing.
 |---|---|---|
 | `-p, --prompt` | — | Prompt to send |
 | `--device` | auto | Force `npu`, `gpu`, or `cpu` |
-| `--backend` | auto | Force `llama.cpp`, `ollama`, or `onnxruntime` |
+| `--backend` | auto | Force `llama.cpp`, `llama.cpp/server`, `ollama`, or `onnxruntime` |
 | `-n, --max-tokens` | `256` | Maximum tokens to generate |
 | `--json` | `false` | Emit a JSON result |
 | `--no-daemon` | `false` | Ignore a running daemon, execute directly |
@@ -73,7 +73,12 @@ packaging entirely — the fast inner loop while developing.
 | `--max-turns` | `8` | Stop after this many tool-calling turns |
 | `--mcp-debug` | `false` | Log every MCP frame in both directions |
 
-When `nexus serve` is running, `run` reaches it automatically and skips
+`--backend ollama` runs a linked `ollama:` source through the local Ollama
+service and reports device `AUTO`. Ollama chooses its own device, so omit
+`--device`. Sealed model weights use a path-based backend such as
+`llama.cpp/server`. An explicit `--backend` bypasses the daemon.
+
+When `nexus serve` is running, an ordinary `run` reaches it automatically and skips
 model load; it falls back to direct execution after a 300 ms dial
 timeout, so the daemon is pure upside.
 

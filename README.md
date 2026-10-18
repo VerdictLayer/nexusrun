@@ -259,6 +259,11 @@ Details and limits in **[docs/SANDBOXING.md](docs/SANDBOXING.md)**.
 
 ## Install
 
+New to local AI? Follow **[Your first local AI helper](docs/QUICKSTART.md)**
+for Ollama installation, a small model download, a complete `nexus.yaml`, and
+your first answer. The [offline walkthrough](docs/OFFLINE_DEMO.md) takes the
+same helper to a Linux computer in a complete deployment bundle.
+
 Download a binary from releases, or build from source:
 
 ```bash
@@ -273,11 +278,26 @@ Windows (x64/arm64), and FreeBSD. Static, CGO-free, no dependencies.
 
 **To actually run models** you also need a GGUF runtime. Either:
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) — `llama-cli` on your PATH, or
-- [Ollama](https://ollama.com) — for model storage NexusRun can borrow from
+- [Ollama](https://ollama.com/download) — running locally; use `--backend ollama`
+  with an `ollama:` model source. It also provides model storage NexusRun can borrow from.
 
 ---
 
 ## Quickstart
+
+For the step-by-step installation guide, start with
+**[Your first local AI helper](docs/QUICKSTART.md)**. Already have Ollama running?
+From this repository after `make build`, try the included small example:
+
+```bash
+ollama pull qwen2.5:0.5b
+./bin/nexus run ./examples/plain-helper --backend ollama -p "What is a backup?"
+./bin/nexus build ./examples/plain-helper
+./bin/nexus run plain-helper:0.1.0 --backend ollama -p "What is a backup?"
+```
+
+The remaining examples use `nexus` installed on PATH and a model already
+available locally:
 
 ```bash
 # See what your machine can do
@@ -381,7 +401,8 @@ fast inner loop while developing.
 
 | Document | What's in it |
 |---|---|
-| [docs/QUICKSTART.md](docs/QUICKSTART.md) | **Start here.** Three steps to build your own agent, three to run someone else's |
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | **Start here.** Install Ollama, download a small model, create the YAML, and run your first helper |
+| [docs/OFFLINE_DEMO.md](docs/OFFLINE_DEMO.md) | Seal the same helper and carry a complete Linux deployment bundle to an offline computer |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, repo map, how to add a backend or model source, testing |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Every command and flag, the manifest schema, env vars, on-disk and OCI layout |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the system is shaped this way — the design decisions and their trade-offs |

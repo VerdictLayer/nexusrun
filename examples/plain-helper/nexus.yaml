@@ -1,0 +1,25 @@
+apiVersion: nexusrun.dev/v1
+name: plain-helper
+version: 0.1.0
+description: Explains everyday computer terms in plain language
+license: Apache-2.0
+
+models:
+  - id: main
+    source: ollama:qwen2.5:0.5b
+    context: 2048
+
+entrypoint:
+  type: chat
+  system_prompt: |
+    Explain everyday computer terms in plain English.
+    Use two short sentences and one familiar example.
+
+hardware:
+  prefer: [cpu]
+
+installation:
+  targets:
+    - os: linux
+      arch: amd64
+      device: cpu

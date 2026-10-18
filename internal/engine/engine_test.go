@@ -107,6 +107,36 @@ func TestSelectFromErrorNamesEveryReason(t *testing.T) {
 	}
 }
 
+func TestSelectForModelNamedBackend(t *testing.T) {
+	ollama := &stubBackend{Capability{Backend: "ollama", Available: true, Devices: []string{"gpu", "cpu"}}}
+	for _, source := range []string{"ollama:qwen2.5:0.5b", "", "./model.gguf", "hf:org/model.gguf", "ollama:"} {
+		t.Run(source, func(t *testing.T) {
+			b, device, err := SelectForModel([]Backend{ollama}, reportWith("cpu"), []string{"cpu"}, source)
+			if source != "ollama:qwen2.5:0.5b" {
+				if err == nil {
+					t.Fatal("name-addressed backend accepted unrelated or sealed weights")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b.Name() != "ollama" || device != "auto" {
+				t.Fatalf("got %s/%s; Ollama must report automatic device placement", b.Name(), device)
+			}
+		})
+	}
+	pathBackend := &stubBackend{ready("llama.cpp", "cpu")}
+	b, device, err := SelectForModel([]Backend{ollama, pathBackend}, reportWith("cpu"), []string{"cpu"}, "ollama:qwen2.5:0.5b")
+	if err != nil || b.Name() != "llama.cpp" || device != "cpu" {
+		t.Fatalf("path-based scheduling changed: backend=%v device=%s error=%v", b, device, err)
+	}
+	ollama.cap.Available = false
+	if _, _, err := SelectForModel([]Backend{ollama}, reportWith("cpu"), []string{"cpu"}, "ollama:qwen2.5:0.5b"); err == nil {
+		t.Fatal("selected an unavailable named backend")
+	}
+}
+
 // The web console (internal/server/console.html) and `nexus doctor --json`
 // read these exact keys. Capability shipped untagged once, which rendered
 // every backend row in the console as an "OFF" pill labelled "undefined" —

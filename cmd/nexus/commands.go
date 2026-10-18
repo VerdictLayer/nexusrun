@@ -130,8 +130,9 @@ func newBuildCmd() *cobra.Command {
 		Long: `Build packages a unit into an OCI artifact in the local store.
 
 By default models are linked by source, keeping artifacts tiny (kilobytes).
-Use --seal to embed model weights, producing a fully self-contained artifact
-that runs with no network access — ideal for air-gapped or edge deployment.`,
+Use --seal to embed model weights for offline transfer. Running the artifact
+also requires an inference engine. Use bundle to include NexusRun and a pinned
+runtime for a supported target.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -188,7 +189,7 @@ func newRunCmd() *cobra.Command {
 			// A session or a restore also has to bypass the daemon: it has
 			// no conversation state, so it would answer the prompt alone
 			// and drop the history the user asked to continue.
-			if !noDaemon && sessionName == "" && restorePath == "" && !unitNeedsDirectRun(ctx, s, ref) {
+			if !noDaemon && backendName == "" && sessionName == "" && restorePath == "" && !unitNeedsDirectRun(ctx, s, ref) {
 				dreq := daemon.RunRequest{
 					Unit: ref, Prompt: prompt, MaxTokens: maxTokens, Device: device,
 				}
@@ -394,7 +395,14 @@ func newRunCmd() *cobra.Command {
 				candidates = picked
 			}
 
-			b, chosen, err := engine.SelectFrom(candidates, hw, prefer)
+			addressSource := modelSource
+			if len(sealed) > 0 || device != "" {
+				addressSource = ""
+			}
+			if backendName == "ollama" && device != "" {
+				return fmt.Errorf("Ollama chooses its own device; omit --device to use --backend ollama")
+			}
+			b, chosen, err := engine.SelectForModel(candidates, hw, prefer, addressSource)
 			if err != nil {
 				if len(m.Tools) > 0 || len(m.MCPServers) > 0 {
 					return fmt.Errorf("%s declares %d tool(s) and %d MCP server(s), which needs a backend that can carry tool calls: %w",
