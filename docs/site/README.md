@@ -9,7 +9,9 @@ python3 scripts/render-guides.py /tmp/nexusrun-guide-site
 ```
 
 This is a documentation build dependency only; it is not used by NexusRun.
-The output has no external scripts, fonts, or browser dependencies.
+Styles, navigation, and copy buttons are embedded in each page. The template
+also includes the website's Google Tag Manager container, `GTM-NVCFBTDC`,
+with its script in the head and noscript iframe immediately after the body tag.
 
 Copy `get-started.html` and `offline-demo.html` into the website source repo.
 Serve them at `/get-started` and `/offline-demo`, with content type
