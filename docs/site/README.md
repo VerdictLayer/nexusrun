@@ -12,6 +12,7 @@ This is a documentation build dependency only; it is not used by NexusRun.
 Styles, navigation, and copy buttons are embedded in each page. The template
 also includes the website's Google Tag Manager container, `GTM-NVCFBTDC`,
 with its script in the head and noscript iframe immediately after the body tag.
+The same head includes the Google Analytics tag for `G-31LHFJYC2Y`.
 
 Copy `get-started.html` and `offline-demo.html` into the website source repo.
 Serve them at `/get-started` and `/offline-demo`, with content type
