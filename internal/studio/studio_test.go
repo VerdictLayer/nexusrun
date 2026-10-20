@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/verdictlayer/nexusrun/internal/server"
 	"github.com/verdictlayer/nexusrun/internal/store"
@@ -21,9 +22,12 @@ type env struct {
 	t    *testing.T
 	root string
 	srv  *httptest.Server
+	p    *project
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { t.Helper(); return newEnvExe(t, "") }
+
+func newEnvExe(t *testing.T, exe string) *env {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -36,12 +40,13 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &project{root: root, store: st}
+	p := &project{root: root, store: st, exe: exe, token: token, code: "0123456789abcdef0123456789abcdef", codeBy: time.Now().Add(time.Minute)}
 	ts := httptest.NewUnstartedServer(nil)
-	ts.Config.Handler = server.Protect(p.routes(), ts.Listener.Addr().String(), token)
+	ts.Config.Handler = server.ProtectExcept(p.routes(), ts.Listener.Addr().String(), token, "/api/exchange")
+	e := &env{t: t, root: root, srv: ts, p: p}
 	ts.Start()
 	t.Cleanup(ts.Close)
-	return &env{t: t, root: root, srv: ts}
+	return e
 }
 
 func (e *env) do(method, path string, body any, headers ...string) (int, []byte) {
@@ -318,5 +323,51 @@ func TestRenderUsesTwoSpaceIndentation(t *testing.T) {
 	json.Unmarshal(out, &rep)
 	if !strings.Contains(rep.YAML, "\nagents:\n  a:\n    unit: a:1\n") {
 		t.Errorf("want two-space indentation, got:\n%s", rep.YAML)
+	}
+}
+
+func TestOneTimeCodeIsExchangedForTheTokenOnce(t *testing.T) {
+	e := newEnv(t)
+	post := func(code string, headers ...string) (int, string) {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/api/exchange", strings.NewReader(`{"code":"`+code+`"}`))
+		req.Header.Set("Content-Type", "application/json") // note: no Authorization header
+		for i := 0; i+1 < len(headers); i += 2 {
+			req.Header.Set(headers[i], headers[i+1])
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	good := e.p.code
+	if c, _ := post("0000", nil...); c != 403 {
+		t.Errorf("a wrong code: %d", c)
+	}
+	if c, _ := post(good, "Origin", "http://evil.example"); c != 403 {
+		t.Errorf("a foreign page must not be able to redeem it: %d", c)
+	}
+	c, body := post(good)
+	if c != 200 || !strings.Contains(body, token) {
+		t.Fatalf("the code should yield the token once: %d %s", c, body)
+	}
+	if c, body := post(good); c != 403 || strings.Contains(body, token) {
+		t.Errorf("a second use must fail without revealing anything: %d %s", c, body)
+	}
+
+	e2 := newEnv(t)
+	e2.p.codeBy = time.Now().Add(-time.Second)
+	req, _ := http.NewRequest("POST", e2.srv.URL+"/api/exchange", strings.NewReader(`{"code":"`+e2.p.code+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.StatusCode != 403 {
+		t.Errorf("an expired code: %d", resp.StatusCode)
+	}
+	// Everything else still needs the token.
+	if c, _ := e.do("GET", "/api/project", nil, "Authorization", ""); c != 401 {
+		t.Errorf("the exchange must not open other routes: %d", c)
 	}
 }

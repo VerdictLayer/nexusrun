@@ -1,133 +1,313 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NexusRun Studio</title>
 <link rel="icon" href="data:,">
+<script>
+// Apply the saved or system theme before anything is drawn, so there is no flash.
+try {
+  var saved = localStorage.getItem("studio.theme");
+  document.documentElement.dataset.theme = saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+} catch (e) { /* storage blocked: stay light */ }
+</script>
 <style>
   :root {
-    --bg: #fbfbfd; --panel: #fff; --text: #14161a; --muted: #666e7a; --line: #e3e6ea;
-    --accent: #2f6df6; --ok: #17864a; --warn: #b06000; --bad: #c8352b; --grid: #eceef2;
-    --node: #fff; --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --bg: #f5f5f7; --surface: #ffffff; --surface2: #f5f5f7; --canvas: #fbfbfd; --dot: #d9d9de;
+    --text: #1d1d1f; --muted: #6e6e73; --faint: #a1a1a6; --line: rgba(0,0,0,.09);
+    --accent: #0071e3; --accent-soft: rgba(0,113,227,.12); --on-accent: #fff;
+    --ok: #1d8a3f; --warn: #b25e00; --bad: #d70015;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.07);
+    --shadow-lg: 0 20px 60px rgba(0,0,0,.22);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0e1013; --panel: #16191e; --text: #e7eaee; --muted: #9aa3ae; --line: #262b33;
-      --accent: #6f9bff; --ok: #4ec27f; --warn: #e0a250; --bad: #ff7b72; --grid: #1a1e24; --node: #1b1f26;
-    }
+  :root[data-theme="dark"] {
+    --bg: #000000; --surface: #1c1c1e; --surface2: #2c2c2e; --canvas: #101012; --dot: #2a2a2e;
+    --text: #f5f5f7; --muted: #a1a1a6; --faint: #6e6e73; --line: rgba(255,255,255,.12);
+    --accent: #2997ff; --accent-soft: rgba(41,151,255,.18); --on-accent: #fff;
+    --ok: #32d74b; --warn: #ffb340; --bad: #ff453a;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
+    --shadow-lg: 0 20px 60px rgba(0,0,0,.7);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
-  #app { display: grid; height: 100%; grid-template-rows: 48px 1fr auto; grid-template-columns: 290px 1fr 320px; grid-template-areas: "top top top" "models stage inspector" "problems problems problems"; }
-  header { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 15px; margin: 0; letter-spacing: -0.01em; }
-  header .dir { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
-  .btn { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
-  .btn:hover { border-color: var(--accent); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.danger { color: var(--bad); }
-  .btn:disabled { opacity: .5; cursor: default; }
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-  aside { background: var(--panel); overflow-y: auto; padding: 14px; }
-  #models { grid-area: models; border-right: 1px solid var(--line); }
-  #inspector { grid-area: inspector; border-left: 1px solid var(--line); }
-  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
-  h3 { font-size: 15px; margin: 0 0 10px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.47 var(--font); -webkit-font-smoothing: antialiased; overflow: hidden; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  .grow { flex: 1; min-width: 0; }
   .muted { color: var(--muted); }
   .small { font-size: 12px; }
   .mono { font-family: var(--mono); font-size: 12px; }
-  input[type=text], input[type=number], textarea, select { width: 100%; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--text); }
-  textarea { resize: vertical; min-height: 90px; font-family: var(--mono); font-size: 12px; }
-  label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; color: var(--muted); }
-  label.inline { display: flex; align-items: center; gap: 6px; margin: 4px 12px 4px 0; font-weight: 400; color: var(--text); }
-  label.inline input { width: auto; }
-  .row { display: flex; flex-wrap: wrap; align-items: center; }
-  .model { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; margin: 0 0 8px; cursor: grab; background: var(--bg); user-select: none; touch-action: none; }
-  .model:hover { border-color: var(--accent); }
-  .model.err { opacity: .55; cursor: default; }
+
+  #app { display: grid; height: 100%; grid-template-rows: 52px 1fr; grid-template-columns: 288px 1fr 330px; grid-template-areas: "top top top" "models stage inspector"; }
+
+  /* toolbar */
+  #top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border-bottom: 1px solid var(--line); z-index: 5; }
+  .brand { font-weight: 650; letter-spacing: -.01em; font-size: 15px; white-space: nowrap; }
+  .crumb { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 34vw; }
+  .save { font-size: 12px; color: var(--muted); min-width: 64px; text-align: right; }
+  .btn { border: 0; border-radius: 980px; padding: 6px 15px; background: var(--surface2); cursor: pointer; font-weight: 500; transition: background .15s, transform .05s; }
+  .btn:hover { background: color-mix(in srgb, var(--surface2) 80%, var(--text) 8%); }
+  .btn:active { transform: scale(.98); }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+  .btn.quiet { background: transparent; color: var(--accent); padding: 4px 8px; }
+  .btn.quiet:hover { background: var(--accent-soft); }
+  .btn.danger { background: transparent; color: var(--bad); padding-left: 0; }
+  .btn.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .icon { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  .icon:hover { background: var(--surface2); color: var(--text); }
+  .icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 980px; padding: 3px 11px; font-size: 12px; font-weight: 500; background: var(--surface2); color: var(--muted); border: 0; }
+  .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .chip.ok { color: var(--ok); } .chip.ok::before { background: var(--ok); }
+  .chip.bad { color: var(--bad); cursor: pointer; } .chip.bad::before { background: var(--bad); }
+  .chip.warn { color: var(--warn); } .chip.warn::before { background: var(--warn); }
+
+  /* side panels */
+  aside { background: var(--surface); overflow-y: auto; padding: 18px 16px 28px; }
+  #models { grid-area: models; border-right: 1px solid var(--line); }
+  #inspector { grid-area: inspector; border-left: 1px solid var(--line); }
+  h2 { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--muted); margin: 0 0 10px; text-transform: uppercase; }
+  h3 { font-size: 21px; font-weight: 650; letter-spacing: -.02em; margin: 0 0 2px; word-break: break-word; }
+  .sub { color: var(--muted); margin: 0 0 14px; }
+  .hw { color: var(--muted); font-size: 12px; margin: -4px 0 12px; }
+  input[type=text], input[type=number], textarea, select { width: 100%; border: 1px solid transparent; border-radius: 10px; background: var(--surface2); padding: 8px 11px; outline: none; transition: border-color .15s, background .15s; }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--surface); }
+  textarea { resize: vertical; min-height: 96px; line-height: 1.45; }
+  label.field { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 16px 0 6px; }
+  .hint { font-size: 12px; color: var(--faint); margin-top: 5px; }
+  label.check { display: inline-flex; align-items: center; gap: 7px; margin: 3px 14px 3px 0; font-size: 13px; cursor: pointer; }
+  label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  details { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); list-style: none; }
+  summary::before { content: "›"; display: inline-block; width: 14px; transition: transform .15s; }
+  details[open] > summary::before { transform: rotate(90deg); }
+
+  /* models */
+  .model { background: var(--surface2); border-radius: 12px; padding: 10px 12px; margin: 0 0 8px; cursor: grab; user-select: none; touch-action: none; border: 1px solid transparent; transition: border-color .15s, box-shadow .15s; }
+  .model:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  .model.err { opacity: .5; cursor: default; }
   .model .name { font-weight: 600; font-size: 13px; word-break: break-all; }
-  .model .meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-  .hw { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
-  #stage { grid-area: stage; position: relative; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--grid) 1px, transparent 1px); background-size: 22px 22px; }
+  .model .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .model .fit { font-size: 12px; margin-top: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .model .fit .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .fit.ok { color: var(--ok); } .fit.ok .dot { background: var(--ok); }
+  .fit.warn { color: var(--warn); } .fit.warn .dot { background: var(--warn); }
+  .fit.bad { color: var(--bad); } .fit.bad .dot { background: var(--bad); }
+  .model .tag { font-size: 11px; color: var(--warn); margin-top: 3px; }
+  .model .testrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; flex-wrap: wrap; }
+  .model .testrow .btn { padding-left: 0; }
+  .model .result { color: var(--muted); }
+  .model .result.ok { color: var(--ok); } .model .result.bad { color: var(--bad); }
+  .dirs .row { display: flex; align-items: center; gap: 8px; }
+
+  /* canvas */
+  #stage { grid-area: stage; position: relative; overflow: hidden; background-color: var(--canvas); background-image: radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size: 24px 24px; }
   #svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
   #svg.panning { cursor: grabbing; }
-  .node rect.box { fill: var(--node); stroke: var(--line); stroke-width: 1.5; }
-  .node:hover rect.box { stroke: var(--accent); }
-  .node.sel rect.box { stroke: var(--accent); stroke-width: 2.5; }
-  .node.bad rect.box { stroke: var(--bad); stroke-width: 2.5; }
-  .node text { fill: var(--text); pointer-events: none; font-family: system-ui, sans-serif; }
-  .node .title { font-size: 14px; font-weight: 700; }
-  .node .sub { font-size: 11px; fill: var(--muted); font-family: var(--mono); }
-  .node .chip { font-size: 11px; }
-  .node .chip.warn { fill: var(--warn); }
-  .node .chip.ok { fill: var(--ok); }
-  .port { fill: var(--panel); stroke: var(--accent); stroke-width: 2; cursor: crosshair; }
+  .node .box { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 6px 14px rgba(0,0,0,.10)); transition: stroke .15s; }
+  :root[data-theme="dark"] .node .box { filter: drop-shadow(0 6px 14px rgba(0,0,0,.5)); }
+  .node:hover .box { stroke: var(--accent); }
+  .node.sel .box { stroke: var(--accent); stroke-width: 2.5; }
+  .node.bad .box { stroke: var(--bad); stroke-width: 2.5; }
+  .node.waiting { opacity: .55; }
+  .node.running .box { stroke: var(--accent); stroke-width: 2.5; animation: pulse 1.2s ease-in-out infinite; }
+  .node.done .box { stroke: var(--ok); stroke-width: 2; }
+  .node.failed .box { stroke: var(--bad); stroke-width: 2.5; }
+  .node.skipped .box { stroke-dasharray: 5 4; opacity: .6; }
+  @keyframes pulse { 50% { stroke-opacity: .35; } }
+  .node text { fill: var(--text); pointer-events: none; font-family: var(--font); }
+  .node .title { font-size: 15px; font-weight: 650; }
+  .node .sub { font-size: 11.5px; fill: var(--muted); font-family: var(--font); margin: 0; }
+  .node .chiptext { font-size: 12px; fill: var(--muted); }
+  .node .chiptext.ok { fill: var(--ok); } .node .chiptext.warn { fill: var(--warn); }
+  .node .status { font-size: 12px; font-weight: 600; }
+  .node .status.running { fill: var(--accent); } .node .status.done { fill: var(--ok); } .node .status.failed { fill: var(--bad); } .node .status.skipped { fill: var(--muted); }
+  .port { fill: var(--surface); stroke: var(--accent); stroke-width: 2; cursor: crosshair; }
   .port:hover { fill: var(--accent); }
-  .edge { fill: none; stroke: var(--muted); stroke-width: 2; }
+  .edge { fill: none; stroke: var(--faint); stroke-width: 2; }
   .edge.sel { stroke: var(--accent); stroke-width: 3; }
   .edge.bad { stroke: var(--bad); stroke-width: 3; }
-  .edgehit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; }
-  .edgelabel { font-size: 11px; fill: var(--muted); font-family: var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; pointer-events: none; }
+  .edge.fired { stroke: var(--ok); stroke-width: 3; }
+  .edge.blocked { stroke-dasharray: 4 5; opacity: .5; }
+  .edgehit { fill: none; stroke: transparent; stroke-width: 18; cursor: pointer; }
+  .edgelabel { font-size: 11px; fill: var(--muted); font-family: var(--mono); paint-order: stroke; stroke: var(--canvas); stroke-width: 5px; pointer-events: none; }
+  #arrow path { fill: var(--faint); } #arrowOk path { fill: var(--ok); } #arrowSel path { fill: var(--accent); } #arrowBad path { fill: var(--bad); }
   #tmp { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; }
-  #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; text-align: center; color: var(--muted); padding: 40px; }
-  #hint div { max-width: 380px; }
-  #problems { grid-area: problems; border-top: 1px solid var(--line); background: var(--panel); max-height: 150px; overflow-y: auto; padding: 8px 16px; }
-  #problems .item { display: flex; gap: 10px; padding: 3px 0; cursor: pointer; font-size: 13px; }
-  #problems .item:hover { color: var(--accent); }
+
+  .floating { position: absolute; display: flex; align-items: center; gap: 2px; padding: 4px; background: color-mix(in srgb, var(--surface) 85%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-radius: 980px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+  #zoom { left: 16px; bottom: 16px; }
+  .floating .icon { width: 30px; height: 30px; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 24px; }
+  #empty .card { pointer-events: auto; max-width: 420px; text-align: center; background: var(--surface); border-radius: 20px; box-shadow: var(--shadow); padding: 30px 30px 24px; border: 1px solid var(--line); }
+  #empty h4 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
+  #empty p { margin: 0 0 18px; color: var(--muted); }
+  #empty .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+  /* problems, yaml, run */
+  #problems { position: absolute; left: 16px; top: 16px; width: min(460px, calc(100% - 32px)); max-height: 42%; overflow-y: auto; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); border: 1px solid var(--line); padding: 8px; z-index: 3; }
+  #problems .item { display: flex; gap: 10px; padding: 8px 10px; border-radius: 9px; cursor: pointer; font-size: 13px; }
+  #problems .item:hover { background: var(--surface2); }
   #problems .path { font-family: var(--mono); font-size: 12px; color: var(--bad); white-space: nowrap; }
-  #yaml { position: absolute; right: 12px; top: 12px; bottom: 12px; width: min(520px, 80%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
-  #yaml pre { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
-  #ghost { position: fixed; z-index: 10; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; opacity: .92; }
-  #banner { position: absolute; top: 0; left: 0; right: 0; z-index: 2; background: color-mix(in srgb, var(--warn) 14%, var(--panel)); border-bottom: 1px solid var(--line); padding: 8px 16px; font-size: 13px; }
-  .grow { flex: 1; }
-  #arrow path { fill: var(--muted); }
-  [hidden] { display: none !important; }
-  @media (max-width: 900px) { #app { grid-template-columns: 220px 1fr 260px; } }
+  #yaml { position: absolute; right: 16px; top: 16px; bottom: 16px; width: min(500px, calc(100% - 32px)); background: var(--surface); border-radius: 16px; box-shadow: var(--shadow); border: 1px solid var(--line); padding: 14px 16px; overflow: auto; z-index: 3; }
+  #yaml pre { margin: 10px 0 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+  #banner { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); padding: 9px 16px; font-size: 13px; text-align: center; }
+  .row { display: flex; align-items: center; gap: 8px; }
+
+  #run { position: absolute; left: 12px; right: 12px; bottom: 12px; height: min(46%, 420px); background: var(--surface); border-radius: 18px; box-shadow: var(--shadow-lg); border: 1px solid var(--line); display: flex; flex-direction: column; z-index: 4; overflow: hidden; }
+  #run header { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; }
+  #run header b { font-size: 15px; letter-spacing: -.01em; }
+  #runInput { display: flex; gap: 10px; padding: 0 14px 10px; align-items: flex-start; }
+  #runInput textarea { min-height: 44px; height: 44px; resize: none; }
+  #trace { flex: 1; overflow-y: auto; padding: 0 14px 14px; }
+  .step { border-radius: 12px; background: var(--surface2); padding: 10px 12px; margin-bottom: 8px; }
+  .step .head { display: flex; align-items: center; gap: 9px; }
+  .step .state { width: 18px; text-align: center; font-weight: 700; }
+  .step .state.done { color: var(--ok); } .step .state.failed { color: var(--bad); } .step .state.skipped, .step .state.waiting { color: var(--faint); }
+  .step .stats { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .step pre { margin: 8px 0 0; white-space: pre-wrap; font-family: var(--font); font-size: 13px; max-height: 190px; overflow: auto; }
+  .step .lab { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 8px; }
+  .step.err { background: color-mix(in srgb, var(--bad) 12%, var(--surface2)); }
+  .step details { margin-top: 8px; padding-top: 8px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #ghost { position: fixed; z-index: 30; pointer-events: none; padding: 7px 13px; border-radius: 980px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; box-shadow: var(--shadow); }
+
+  /* welcome */
+  #welcome { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.38); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 20px; }
+  #welcome .sheet { width: min(560px, 100%); max-height: 100%; overflow-y: auto; background: var(--surface); border-radius: 24px; box-shadow: var(--shadow-lg); padding: 34px 34px 26px; }
+  #welcome h1 { font-size: 27px; letter-spacing: -.025em; margin: 0 0 6px; }
+  #welcome .lead { color: var(--muted); margin: 0 0 22px; font-size: 15px; }
+  #welcome .steps { display: grid; gap: 15px; margin-bottom: 24px; }
+  #welcome .stepn { display: flex; gap: 14px; align-items: flex-start; }
+  #welcome .num { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  #welcome .stepn b { display: block; font-size: 15px; }
+  #welcome .stepn span { color: var(--muted); }
+  #welcome footer { display: flex; align-items: center; gap: 10px; }
+  #welcome footer .btn { white-space: nowrap; }
 </style>
 </head>
 <body>
 <div id="app">
-  <header>
-    <h1>NexusRun Studio</h1>
-    <span class="dir" id="dir"></span>
-    <span class="pill" id="health">…</span>
-    <span class="small muted" id="save"></span>
-    <button class="btn" id="addAgent" type="button" title="Drag onto the canvas, or click to add at the centre">＋ Agent</button>
-    <button class="btn" id="fit" type="button">Fit</button>
-    <button class="btn" id="showYaml" type="button">YAML</button>
+  <header id="top">
+    <span class="brand">NexusRun Studio</span>
+    <span class="crumb" id="crumb"></span>
+    <button class="chip" id="health" type="button">…</button>
+    <span class="grow"></span>
+    <span class="save" id="save"></span>
+    <button class="btn" id="addAgent" type="button" title="Click to add an agent, or drag this onto the canvas">＋ Add agent</button>
+    <button class="btn primary" id="runBtn" type="button">▶ Run</button>
+    <span class="sep"></span>
+    <button class="icon" id="yamlBtn" type="button" title="Show the file" aria-label="Show the file"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg></button>
+    <button class="icon" id="helpBtn" type="button" title="How it works" aria-label="How it works"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/></svg></button>
+    <button class="icon" id="themeBtn" type="button" title="Switch light or dark" aria-label="Switch light or dark"></button>
   </header>
+
   <aside id="models"></aside>
+
   <main id="stage">
     <svg id="svg" role="application" aria-label="Workflow canvas">
       <defs>
-        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="arrowOk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="arrowSel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="arrowBad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
       </defs>
       <g id="vp"><g id="edges"></g><g id="nodes"></g><path id="tmp" d=""></path></g>
     </svg>
-    <div id="hint"><div><b>Build a workflow</b><br>Drag <b>＋ Agent</b> onto the canvas. Drag a model from the left onto an agent. Drag from an agent's right dot to another agent to send its output there.</div></div>
-    <div id="yaml" hidden><div class="row"><b class="grow">nexus-compose.yaml</b><button class="btn" id="copyYaml" type="button">Copy</button></div><pre id="yamlText"></pre></div>
+    <div id="empty" hidden>
+      <div class="card">
+        <h4>Start with your first agent</h4>
+        <p>An agent is one step in your workflow. Give it instructions and a model, then connect it to other agents.</p>
+        <div class="actions">
+          <button class="btn primary" id="emptyAdd" type="button">＋ Add an agent</button>
+          <button class="btn" id="emptyExample" type="button">Start from an example</button>
+        </div>
+      </div>
+    </div>
+    <div class="floating" id="zoom">
+      <button class="icon" id="zoomOut" type="button" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+      <button class="icon" id="zoomIn" type="button" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="icon" id="fit" type="button" title="Fit to screen" aria-label="Fit to screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+    <div id="problems" hidden></div>
+    <div id="yaml" hidden>
+      <div class="row"><b class="grow">nexus-compose.yaml</b><button class="btn" id="copyYaml" type="button">Copy</button><button class="icon" id="closeYaml" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <pre id="yamlText"></pre>
+    </div>
+    <section id="run" hidden>
+      <header>
+        <b>Run</b><span class="muted small" id="runStatus"></span><span class="grow"></span>
+        <button class="icon" id="closeRun" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </header>
+      <div id="runInput">
+        <textarea id="runText" placeholder="What should the first agent work on? For example: Explain why the sky is blue."></textarea>
+        <button class="btn primary" id="runGo" type="button">Run</button>
+        <button class="btn" id="runStop" type="button" hidden>Stop</button>
+      </div>
+      <div id="trace"></div>
+    </section>
   </main>
+
   <aside id="inspector"></aside>
-  <section id="problems"></section>
 </div>
 <div id="ghost" hidden></div>
+
+<div id="welcome" hidden role="dialog" aria-modal="true" aria-labelledby="wTitle">
+  <div class="sheet">
+    <h1 id="wTitle">Welcome to NexusRun Studio</h1>
+    <p class="lead">Build an AI workflow by connecting small steps. Everything runs on your own computer.</p>
+    <div class="steps">
+      <div class="stepn"><span class="num">1</span><div><b>Add an agent</b><span>An agent is one step. It has instructions, called a prompt, and a model that does the thinking.</span></div></div>
+      <div class="stepn"><span class="num">2</span><div><b>Give it a model</b><span>Drag a model from the list on the left onto an agent. Models marked “Fits” run comfortably on this computer.</span></div></div>
+      <div class="stepn"><span class="num">3</span><div><b>Connect agents</b><span>Drag from the dot on the right of an agent to another agent. The first one's answer becomes the second one's input.</span></div></div>
+      <div class="stepn"><span class="num">4</span><div><b>Run it</b><span>Press Run, type a question, and watch each step work. Use Test on a model to check it works before you rely on it.</span></div></div>
+    </div>
+    <footer>
+      <label class="check"><input type="checkbox" id="wNever" checked> Don't show this again</label>
+      <span class="grow"></span>
+      <button class="btn" id="wExample" type="button">Try an example</button>
+      <button class="btn primary" id="wGo" type="button">Get started</button>
+    </footer>
+  </div>
+</div>
 
 <script>
 "use strict";
 // Everything that comes from disk (model names, unit references, YAML) is put on
 // the page with textContent only, never as markup.
-const token = (() => {
+let token = (() => {
   const m = /[#&]token=([0-9a-f]+)/.exec(location.hash);
   try {
     if (m) { sessionStorage.setItem("studio-token", m[1]); history.replaceState(null, "", location.pathname); }
     return sessionStorage.getItem("studio-token") || "";
   } catch { return m ? m[1] : ""; }
 })();
+// A link opened by another program carries a one-time code instead of the token,
+// because command lines can be read by other accounts on the machine.
+async function redeemCode() {
+  const m = /[#&]code=([0-9a-f]+)/.exec(location.hash);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const r = await fetch("/api/exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: m[1] }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
+    token = d.token;
+    try { sessionStorage.setItem("studio-token", token); } catch { /* storage blocked: this tab only */ }
+  } catch (e) { redeemError = e.message; }
+}
+let redeemError = "";
+const pref = {
+  get(k) { try { return localStorage.getItem("studio." + k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem("studio." + k, v); } catch { /* storage blocked */ } },
+};
 
 async function api(method, path, body) {
   const r = await fetch(path, {
@@ -165,13 +345,31 @@ function s(tag, attrs, text) {
 }
 const $ = (id) => document.getElementById(id);
 const clip = (str, n) => { str = String(str ?? ""); return str.length > n ? str.slice(0, n - 1) + "…" : str; };
+const secs = (ms) => (ms < 950 ? Math.round(ms) + " ms" : (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s");
+
+// ---------- theme ----------
+const ICON_MOON = '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>';
+const ICON_SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  const svg = s("svg", { viewBox: "0 0 24 24" });
+  svg.innerHTML = t === "dark" ? ICON_SUN : ICON_MOON; // fixed markup, no data from disk
+  $("themeBtn").replaceChildren(svg);
+  $("themeBtn").title = t === "dark" ? "Switch to light" : "Switch to dark";
+}
+$("themeBtn").addEventListener("click", () => {
+  const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  pref.set("theme", t); applyTheme(t);
+});
+applyTheme(document.documentElement.dataset.theme || "light");
 
 // ---------- state ----------
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-const W = 230, H = 104;
+const W = 236, H = 108;
 const S = {
   spec: null, layout: {}, models: [], hw: null, dirs: [], fixedDirs: [], sel: null,
   diags: [], units: {}, view: { x: 40, y: 40, k: 1 }, yaml: "", broken: false, project: null,
+  tests: {}, busy: false, run: null, problemsOpen: false,
 };
 
 function ownDir(agent) {
@@ -183,7 +381,7 @@ function ownDir(agent) {
 let seq = 0, timer = null;
 function changed() {
   if (S.broken) return;
-  $("save").textContent = "Unsaved…";
+  $("save").textContent = "Saving…";
   clearTimeout(timer);
   timer = setTimeout(commit, 450);
 }
@@ -196,7 +394,7 @@ async function commit() {
     await api("PUT", "/api/workflow", { yaml: rep.yaml });
     if (mine !== seq) return;
     $("save").textContent = "Saved";
-  } catch (e) { $("save").textContent = "Not saved: " + e.message; }
+  } catch (e) { $("save").textContent = "Not saved"; $("save").title = e.message; }
   renderProblems(); decorate(); renderYaml();
 }
 let layoutTimer = null;
@@ -207,8 +405,7 @@ function layoutChanged() {
 
 // ---------- layout ----------
 function levels() {
-  const lv = {}, names = Object.keys(S.spec.agents);
-  const preds = {};
+  const lv = {}, names = Object.keys(S.spec.agents), preds = {};
   names.forEach((n) => (preds[n] = new Set(S.spec.agents[n].depends_on || [])));
   S.spec.routing.forEach((r) => preds[r.to]?.add(r.from));
   const visit = (n, seen) => {
@@ -223,20 +420,19 @@ function levels() {
   return lv;
 }
 function autoPlace() {
-  const lv = levels(), rows = {};
+  const lv = levels(), used = {};
+  for (const n of Object.keys(S.spec.agents)) if (S.layout[n]) used[lv[n] || 0] = (used[lv[n] || 0] || 0) + 1;
   for (const n of Object.keys(S.spec.agents)) {
     if (S.layout[n]) continue;
-    const c = lv[n] || 0;
-    rows[c] = (rows[c] ?? Object.keys(S.layout).filter((k) => S.spec.agents[k] && (lv[k] || 0) === c).length);
-    S.layout[n] = { x: 60 + c * 320, y: 60 + rows[c] * 150 };
-    rows[c]++;
+    const c = lv[n] || 0, row = used[c] || 0;
+    used[c] = row + 1;
+    S.layout[n] = { x: 60 + c * 330, y: 80 + row * 160 };
   }
 }
 
 // ---------- drawing ----------
-function nodeRect(n) { const p = S.layout[n]; return { x: p.x, y: p.y, w: W, h: H }; }
-function outPt(n) { const r = nodeRect(n); return { x: r.x + W, y: r.y + H / 2 }; }
-function inPt(n) { const r = nodeRect(n); return { x: r.x, y: r.y + H / 2 }; }
+function outPt(n) { const p = S.layout[n]; return { x: p.x + W, y: p.y + H / 2 }; }
+function inPt(n) { const p = S.layout[n]; return { x: p.x, y: p.y + H / 2 }; }
 function curve(a, b) {
   const dx = Math.max(60, Math.abs(b.x - a.x) / 2);
   return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
@@ -244,15 +440,16 @@ function curve(a, b) {
 
 function modelLabel(name) {
   const a = S.spec.agents[name], dir = ownDir(name), u = dir ? S.units[dir] : null;
-  if (a.model) return { text: "model: " + clip(a.model, 26), cls: "ok" };
-  if (u && u.editable) return u.model ? { text: "model: " + clip(u.model, 26), cls: "ok" } : { text: "no model chosen", cls: "warn" };
-  return { text: "model: from its unit", cls: "" };
+  if (a.model) return { text: clip(a.model, 28), cls: "ok" };
+  if (u && u.editable) return u.model ? { text: clip(u.model, 28), cls: "ok" } : { text: "Choose a model", cls: "warn" };
+  return { text: "Model from its unit", cls: "" };
 }
 function promptLabel(name) {
   const dir = ownDir(name), u = dir ? S.units[dir] : null;
   if (!u || !u.editable) return null;
-  return u.prompt ? { text: "prompt: " + u.prompt.length + " chars", cls: "ok" } : { text: "no prompt yet", cls: "warn" };
+  return u.prompt ? { text: "Instructions added", cls: "" } : { text: "No instructions yet", cls: "warn" };
 }
+const STATUS = { waiting: "", running: "Working…", done: "Done", skipped: "Skipped", failed: "Failed" };
 
 function draw() {
   $("vp").setAttribute("transform", `translate(${S.view.x},${S.view.y}) scale(${S.view.k})`);
@@ -264,23 +461,24 @@ function draw() {
     const g = s("g", { "data-edge": i });
     g.append(s("path", { class: "edge", d, "marker-end": "url(#arrow)" }), s("path", { class: "edgehit", d }));
     const label = r.condition && r.condition !== "always" ? r.condition : "";
-    if (label || r.transform) g.append(s("text", { class: "edgelabel", x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 8, "text-anchor": "middle" }, clip((label || "transform") + (label && r.transform ? "  ⟶ transform" : ""), 34)));
+    if (label || r.transform) g.append(s("text", { class: "edgelabel", x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 10, "text-anchor": "middle" }, clip(label || "reshaped", 30)));
     edges.append(g);
   });
   for (const name of Object.keys(S.spec.agents)) {
     const p = S.layout[name], a = S.spec.agents[name];
     const g = s("g", { class: "node", "data-agent": name, transform: `translate(${p.x},${p.y})` });
-    g.append(s("rect", { class: "box", width: W, height: H, rx: 11 }));
-    g.append(s("text", { class: "title", x: 16, y: 26 }, clip(name, 24)));
-    g.append(s("text", { class: "sub", x: 16, y: 44 }, clip(a.unit || "no unit yet", 32)));
+    g.append(s("rect", { class: "box", width: W, height: H, rx: 16 }));
+    g.append(s("text", { class: "title", x: 18, y: 30 }, clip(name, 20)));
+    g.append(s("text", { class: "sub", x: 18, y: 49 }, clip(a.unit || "No unit yet", 34)));
     const m = modelLabel(name), pr = promptLabel(name);
-    g.append(s("text", { class: "chip " + m.cls, x: 16, y: 68 }, m.text));
-    if (pr) g.append(s("text", { class: "chip " + pr.cls, x: 16, y: 88 }, pr.text));
+    g.append(s("text", { class: "chiptext " + m.cls, x: 18, y: 75 }, m.text));
+    if (pr) g.append(s("text", { class: "chiptext " + pr.cls, x: 18, y: 94 }, pr.text));
+    g.append(s("text", { class: "status", x: W - 16, y: 30, "text-anchor": "end" }, ""));
     g.append(s("circle", { class: "port", "data-port": "in", cx: 0, cy: H / 2, r: 7 }), s("circle", { class: "port", "data-port": "out", cx: W, cy: H / 2, r: 7 }));
     nodes.append(g);
   }
   decorate();
-  $("hint").hidden = Object.keys(S.spec.agents).length > 0;
+  $("empty").hidden = Object.keys(S.spec.agents).length > 0;
 }
 
 function decorate() {
@@ -293,31 +491,45 @@ function decorate() {
     if (a) bad.add(a[1]);
     if (d.path === "agents" && d.agents) S.spec.routing.forEach((r, i) => { if (d.agents.includes(r.from) && d.agents.includes(r.to)) badEdges.add(i); });
   }
+  const run = S.run;
   document.querySelectorAll(".node").forEach((el) => {
-    const n = el.dataset.agent;
-    el.classList.toggle("bad", bad.has(n));
+    const n = el.dataset.agent, st = run?.steps[n]?.state || "";
+    el.classList.toggle("bad", bad.has(n) && !run);
     el.classList.toggle("sel", S.sel?.kind === "agent" && S.sel.name === n);
+    for (const k of ["waiting", "running", "done", "skipped", "failed"]) el.classList.toggle(k, st === k);
+    const label = el.querySelector(".status");
+    label.textContent = STATUS[st] || "";
+    label.setAttribute("class", "status " + st);
   });
   document.querySelectorAll("#edges g").forEach((el) => {
-    const i = +el.dataset.edge, p = el.querySelector(".edge");
-    p.classList.toggle("bad", badEdges.has(i));
+    const i = +el.dataset.edge, r = S.spec.routing[i], p = el.querySelector(".edge");
+    const fired = run?.fired[r.from + ">" + r.to];
+    p.classList.toggle("bad", badEdges.has(i) && !run);
     p.classList.toggle("sel", S.sel?.kind === "edge" && S.sel.i === i);
+    p.classList.toggle("fired", fired === true);
+    p.classList.toggle("blocked", fired === false);
+    const bad = badEdges.has(i) && !run, sel = S.sel?.kind === "edge" && S.sel.i === i;
+    p.setAttribute("marker-end", "url(#" + (bad ? "arrowBad" : fired === true ? "arrowOk" : sel ? "arrowSel" : "arrow") + ")");
   });
-  const n = S.diags.length;
-  const pill = $("health");
-  pill.textContent = S.broken ? "can't read file" : n === 0 ? (Object.keys(S.spec?.agents || {}).length ? "valid" : "empty") : n + " problem" + (n === 1 ? "" : "s");
-  pill.className = "pill " + (S.broken || n ? "bad" : Object.keys(S.spec?.agents || {}).length ? "ok" : "");
+  const n = S.diags.length, agents = Object.keys(S.spec?.agents || {}).length, chip = $("health");
+  if (S.broken) { chip.textContent = "Can't read the file"; chip.className = "chip bad"; }
+  else if (n) { chip.textContent = n + (n === 1 ? " thing to fix" : " things to fix"); chip.className = "chip bad"; }
+  else if (!agents) { chip.textContent = "Empty"; chip.className = "chip"; }
+  else { chip.textContent = "Ready to run"; chip.className = "chip ok"; }
+  $("runBtn").disabled = !!S.broken;
 }
 
 function renderProblems() {
   const box = $("problems");
   box.replaceChildren();
-  box.hidden = S.diags.length === 0;
+  if (!S.diags.length) S.problemsOpen = false;
+  box.hidden = !S.problemsOpen;
   for (const d of S.diags) {
     const where = d.path || (d.line ? "line " + d.line : "file");
-    box.append(h("div", { class: "item", onclick: () => focusDiag(d) }, h("span", { class: "path" }, where), h("span", {}, d.message)));
+    box.append(h("div", { class: "item", onclick: () => { focusDiag(d); } }, h("span", { class: "path" }, where), h("span", {}, d.message)));
   }
 }
+$("health").addEventListener("click", () => { if (!S.diags.length) return; S.problemsOpen = !S.problemsOpen; renderProblems(); });
 function focusDiag(d) {
   const e = /^routing\[(\d+)\]/.exec(d.path);
   if (e) return select({ kind: "edge", i: +e[1] });
@@ -327,12 +539,11 @@ function focusDiag(d) {
 }
 function renderYaml() { $("yamlText").textContent = S.yaml; }
 
-// ---------- selection and inspector ----------
+// ---------- inspector ----------
 function select(sel) { S.sel = sel; decorate(); inspect(); }
-
 function field(label, input, hint) {
-  const out = [h("label", {}, label), input];
-  if (hint) out.push(h("div", { class: "small muted" }, hint));
+  const out = [h("label", { class: "field" }, label), input];
+  if (hint) out.push(h("div", { class: "hint" }, hint));
   return out;
 }
 function textInput(value, onInput, attrs) {
@@ -340,19 +551,17 @@ function textInput(value, onInput, attrs) {
   el.addEventListener("input", () => onInput(el.value));
   return el;
 }
-
 let unitTimer = null;
 function saveUnit(dir, patch) {
   clearTimeout(unitTimer);
-  $("save").textContent = "Unsaved…";
+  $("save").textContent = "Saving…";
   unitTimer = setTimeout(async () => {
     try { S.units[dir] = await api("PUT", "/api/unit?agent=" + encodeURIComponent(dir), patch); $("save").textContent = "Saved"; draw(); }
-    catch (e) { $("save").textContent = "Not saved: " + e.message; }
+    catch (e) { $("save").textContent = "Not saved"; $("save").title = e.message; }
   }, 500);
 }
-
 async function loadUnit(dir) {
-  try { S.units[dir] = await api("GET", "/api/unit?agent=" + encodeURIComponent(dir)); } catch { /* shown as a unit with no details */ }
+  try { S.units[dir] = await api("GET", "/api/unit?agent=" + encodeURIComponent(dir)); } catch { /* shown without details */ }
 }
 
 function inspect() {
@@ -366,116 +575,112 @@ function inspect() {
 
 function inspectWorkflow(box) {
   const sp = S.spec;
-  box.append(h("h2", {}, "Workflow"), h("h3", {}, sp.name || "untitled"));
+  box.append(h("h3", {}, sp.name || "Untitled workflow"), h("p", { class: "sub" }, "Select an agent or a link to edit it."));
   box.append(...field("Name", textInput(sp.name, (v) => { sp.name = v; changed(); }), "lowercase letters, digits and hyphens"));
-  box.append(...field("Version", textInput(sp.version, (v) => { sp.version = v; changed(); })));
   box.append(...field("Description", textInput(sp.description || "", (v) => { sp.description = v || undefined; changed(); })));
-  const backend = h("select", {}, ["memory", "file"].map((v) => h("option", { value: v, selected: (sp.shared_state?.backend || "memory") === v }, v)));
+  const adv = h("details", {}, h("summary", {}, "Advanced"));
+  const backend = h("select", {}, ["memory", "file"].map((v) => h("option", { value: v, selected: (sp.shared_state?.backend || "memory") === v }, v === "memory" ? "Forget when finished" : "Keep a log file")));
   backend.addEventListener("change", () => {
     sp.shared_state = sp.shared_state || {};
     sp.shared_state.backend = backend.value === "memory" ? undefined : backend.value;
     if (backend.value === "memory") { delete sp.shared_state.path; delete sp.shared_state.encryption; }
     changed(); inspect();
   });
-  box.append(...field("Message bus", backend, "memory is gone when the run ends; file keeps a log you can read back"));
+  adv.append(...field("Messages between agents", backend));
   if (sp.shared_state?.backend === "file") {
-    box.append(h("label", { class: "inline" }, h("input", { type: "checkbox", checked: sp.shared_state.encryption === "aes256-gcm", onchange: (e) => { sp.shared_state.encryption = e.target.checked ? "aes256-gcm" : undefined; changed(); } }), "Encrypt the log (needs NEXUS_STATE_KEY)"));
+    adv.append(h("label", { class: "check" }, h("input", { type: "checkbox", checked: sp.shared_state.encryption === "aes256-gcm", onchange: (e) => { sp.shared_state.encryption = e.target.checked ? "aes256-gcm" : undefined; changed(); } }), "Encrypt the log (needs NEXUS_STATE_KEY)"));
   }
-  const iso = h("select", {}, ["process", "namespace", "none"].map((v) => h("option", { value: v, selected: (sp.network?.isolation || "process") === v }, v)));
+  const iso = h("select", {}, [["process", "Separate processes"], ["namespace", "Separate namespaces"], ["none", "None"]].map(([v, t]) => h("option", { value: v, selected: (sp.network?.isolation || "process") === v }, t)));
   iso.addEventListener("change", () => { sp.network = sp.network || {}; sp.network.isolation = iso.value === "process" ? undefined : iso.value; changed(); });
-  box.append(...field("Network isolation", iso));
-  box.append(h("p", { class: "small muted", style: { marginTop: "18px" } }, "Select an agent or a link to edit it. Press Delete to remove the selection."));
-  if (S.project?.has_comments) box.append(h("p", { class: "small muted" }, "This file had comments. Studio rewrites the file without them and keeps your original as nexus-compose.yaml.bak."));
+  adv.append(...field("Isolation between agents", iso));
+  box.append(adv);
+  if (S.project?.has_comments) box.append(h("p", { class: "hint", style: { marginTop: "16px" } }, "This file had comments. Studio rewrites the file without them and keeps your original as nexus-compose.yaml.bak."));
 }
 
 function inspectAgent(box, name) {
   const a = S.spec.agents[name], dir = ownDir(name);
-  box.append(h("h2", {}, "Agent"));
-  const nameInput = textInput(name, () => {}, {});
+  box.append(h("h3", {}, name), h("p", { class: "sub" }, "Agent"));
+  const nameInput = textInput(name, () => {});
   nameInput.addEventListener("change", () => renameAgent(name, nameInput.value.trim()));
-  box.append(...field("Name", nameInput, "letters, digits and underscores; used in conditions as " + name + ".output"));
+  box.append(...field("Name", nameInput, "Letters, digits and underscores. Other agents refer to it as " + name + ".output"));
 
   if (dir) {
     const u = S.units[dir];
-    if (!u) { box.append(h("p", { class: "muted small" }, "Loading its unit…")); loadUnit(dir).then(() => { draw(); inspect(); }); }
-    else if (!u.editable) {
-      box.append(h("p", { class: "small muted" }, u.reason || "Studio cannot edit this unit."));
-    } else {
-      const ta = h("textarea", { rows: 6, spellcheck: "false", placeholder: "You are… Tell the model how to behave." });
+    if (!u) { box.append(h("p", { class: "muted small" }, "Loading…")); loadUnit(dir).then(() => { draw(); inspect(); }); }
+    else if (!u.editable) box.append(h("p", { class: "hint" }, u.reason || "Studio cannot edit this unit."));
+    else {
+      const ta = h("textarea", { rows: 6, spellcheck: "false", placeholder: "Tell the model what to do. For example: Summarise the text you are given in two sentences." });
       ta.value = u.prompt || "";
       ta.addEventListener("input", () => { u.prompt = ta.value; saveUnit(dir, { prompt: ta.value }); });
-      box.append(...field("Prompt", ta, "the model's instructions; saved in " + a.unit + "/nexus.yaml"));
-      const mi = textInput(u.model || "", (v) => { u.model = v; if (v.trim()) saveUnit(dir, { model: v.trim() }); }, { placeholder: "drag a model here, or type ollama:name:tag" });
-      box.append(...field("Model", mi, a.model ? "overridden below by this workflow" : "drag a model from the left onto the agent"));
+      box.append(...field("Instructions", ta, "This is the prompt: how the model should behave."));
+      const mi = textInput(u.model || "", (v) => { u.model = v; if (v.trim()) saveUnit(dir, { model: v.trim() }); }, { placeholder: "Drag a model here from the left" });
+      box.append(...field("Model", mi, a.model ? "This workflow overrides it below." : "Drag a model from the list onto the agent, or type its name."));
       const ctx = h("input", { type: "number", min: 0, step: 256, value: u.context || "" });
       ctx.addEventListener("input", () => { u.context = +ctx.value || 0; saveUnit(dir, { context: +ctx.value || 0 }); });
-      box.append(...field("Context window (tokens)", ctx));
+      box.append(...field("Memory size (tokens)", ctx, "How much text the model can keep in mind at once."));
     }
   }
-  box.append(...field(dir ? "Unit" : "Unit reference", textInput(a.unit, (v) => { a.unit = v; changed(); draw(); }), dir ? "this agent's own unit; change it to use a different one" : "name:version, a registry reference, or a folder"));
+  const adv = h("details", {}, h("summary", {}, "Advanced"));
+  adv.append(...field(dir ? "Unit" : "Unit reference", textInput(a.unit, (v) => { a.unit = v; changed(); draw(); }), dir ? "This agent's own unit. Change it to use a different one." : "name:version, a registry reference, or a folder"));
   if (!dir) {
-    box.append(h("div", { style: { marginTop: "8px" } }, h("button", { class: "btn", type: "button", onclick: () => createOwnUnit(name) }, "Create a chat unit for this agent")));
-    box.append(...field("Model override", textInput(a.model || "", (v) => { a.model = v.trim() || undefined; changed(); draw(); }, { placeholder: "use the unit's own model" }), "swaps the model for this workflow only"));
+    adv.append(h("div", { style: { marginTop: "8px" } }, h("button", { class: "btn", type: "button", onclick: () => createOwnUnit(name) }, "Create a chat unit for this agent")));
+    adv.append(...field("Model override", textInput(a.model || "", (v) => { a.model = v.trim() || undefined; changed(); draw(); }, { placeholder: "Use the unit's own model" }), "Swaps the model for this workflow only."));
   }
-
   const prefer = new Set(a.hardware?.prefer || []);
-  const row = h("div", { class: "row" }, ["gpu", "cpu", "npu"].map((d) => h("label", { class: "inline" }, h("input", { type: "checkbox", checked: prefer.has(d), onchange: (e) => {
+  adv.append(h("label", { class: "field" }, "Runs on"), h("div", { class: "row" }, ["gpu", "cpu", "npu"].map((d) => h("label", { class: "check" }, h("input", { type: "checkbox", checked: prefer.has(d), onchange: (e) => {
     e.target.checked ? prefer.add(d) : prefer.delete(d);
     a.hardware = prefer.size ? { prefer: ["npu", "gpu", "cpu"].filter((x) => prefer.has(x)) } : undefined;
     changed();
-  } }), d.toUpperCase())));
-  box.append(h("label", {}, "Run on"), row, h("div", { class: "small muted" }, "none ticked: the unit's own preference"));
-
+  } }), d.toUpperCase()))), h("div", { class: "hint" }, "None ticked: whatever the unit prefers."));
   const mt = h("input", { type: "number", min: 0, value: a.max_tokens || "" });
   mt.addEventListener("input", () => { a.max_tokens = +mt.value || undefined; changed(); });
-  box.append(...field("Max tokens", mt));
+  adv.append(...field("Longest answer (tokens)", mt));
   const rs = h("input", { type: "number", min: 0, value: a.restart || "" });
   rs.addEventListener("input", () => { a.restart = +rs.value || undefined; changed(); });
-  box.append(...field("Retries after a crash", rs));
-  box.append(h("div", { style: { marginTop: "18px" } }, h("button", { class: "btn danger", type: "button", onclick: () => deleteAgent(name) }, "Delete agent")));
+  adv.append(...field("Retries if it crashes", rs));
+  box.append(adv);
+  box.append(h("div", { style: { marginTop: "22px" } }, h("button", { class: "btn danger", type: "button", onclick: () => deleteAgent(name) }, "Delete agent")));
 }
 
 function inspectEdge(box, i) {
   const r = S.spec.routing[i];
-  box.append(h("h2", {}, "Link"), h("h3", {}, r.from + " → " + r.to));
-  box.append(...field("Send only when", textInput(r.condition || "", (v) => { r.condition = v.trim() || undefined; changed(); draw(); }, { placeholder: "always", spellcheck: "false" }),
-    "an expression over earlier outputs, such as len(" + r.from + ".output) > 200 or " + r.from + ".ok"));
-  box.append(h("div", { class: "row small muted" }, ["output", "ok", "tokens", "took_ms", "tok_per_sec"].map((f) => h("button", { class: "btn", type: "button", style: { margin: "4px 4px 0 0", padding: "2px 7px" }, onclick: () => {
+  box.append(h("h3", {}, r.from + " → " + r.to), h("p", { class: "sub" }, "Link: " + r.from + "'s answer goes to " + r.to));
+  box.append(...field("Only send when", textInput(r.condition || "", (v) => { r.condition = v.trim() || undefined; changed(); draw(); }, { placeholder: "Always" }),
+    "Leave empty to always send. Otherwise write a check such as len(" + r.from + ".output) > 200"));
+  box.append(h("div", { class: "row", style: { flexWrap: "wrap", marginTop: "6px" } }, ["output", "ok", "tokens", "took_ms"].map((f) => h("button", { class: "btn quiet", type: "button", onclick: () => {
     r.condition = (r.condition && r.condition !== "always" ? r.condition + " && " : "") + r.from + "." + f; changed(); draw(); inspect();
   } }, r.from + "." + f))));
-  const ta = h("textarea", { rows: 6, spellcheck: "false", placeholder: "Reshape the payload. Go template, e.g. Summarise: {{ .%s.output }}".replace("%s", r.from) });
+  const ta = h("textarea", { rows: 6, spellcheck: "false", placeholder: "Summarise this: {{ ." + r.from + ".output }}" });
   ta.value = r.transform || "";
   ta.addEventListener("input", () => { r.transform = ta.value || undefined; changed(); draw(); });
-  box.append(...field("Reshape what is sent", ta, "empty passes " + r.from + "'s output through unchanged"));
-  box.append(h("div", { style: { marginTop: "18px" } }, h("button", { class: "btn danger", type: "button", onclick: () => deleteEdge(i) }, "Delete link")));
+  box.append(...field("Reshape what is sent", ta, "Optional. Leave empty to pass " + r.from + "'s answer along unchanged."));
+  box.append(h("div", { style: { marginTop: "22px" } }, h("button", { class: "btn danger", type: "button", onclick: () => deleteEdge(i) }, "Delete link")));
 }
 
 // ---------- edits ----------
-function uniqueName(base) { let n = base, i = 2; while (S.spec.agents[n]) n = base + i++; return n; }
-
 // A name whose unit folder is also unused, so a new agent never takes over (and
 // resets) the unit of one that was deleted earlier.
-async function freeName() {
+async function freeName(base) {
   const tried = new Set();
   for (let i = 0; i < 200; i++) {
-    let name = "agent", k = 2;
-    while (S.spec.agents[name] || tried.has(name)) name = "agent" + k++;
+    let name = base, k = 2;
+    while (S.spec.agents[name] || tried.has(name)) name = base + k++;
     tried.add(name);
     try { if (!(await api("GET", "/api/unit?agent=" + name)).exists) return name; } catch { return name; }
   }
   throw new Error("too many agents");
 }
-async function addAgent(x, y) {
+async function addAgent(x, y, opts = {}) {
   let name;
-  try { name = await freeName(); } catch (e) { $("save").textContent = e.message; return; }
+  try { name = await freeName(opts.name || "agent"); } catch (e) { $("save").textContent = e.message; return null; }
   S.spec.agents[name] = { unit: "./agents/" + name };
-  // Step aside from any agent already there, so a new one is never hidden under another.
   const taken = (px, py) => Object.values(S.layout).some((p) => Math.abs(p.x - px) < 40 && Math.abs(p.y - py) < 40);
   x = Math.round(x); y = Math.round(y);
   while (taken(x, y)) { x += 40; y += 40; }
   S.layout[name] = { x, y };
-  try { S.units[name] = await api("PUT", "/api/unit?agent=" + name, { prompt: "" }); } catch (e) { $("save").textContent = "Not saved: " + e.message; }
+  try { S.units[name] = await api("PUT", "/api/unit?agent=" + name, { prompt: opts.prompt || "", model: opts.model, context: opts.context }); } catch (e) { $("save").textContent = "Not saved"; $("save").title = e.message; }
   layoutChanged(); changed(); draw(); select({ kind: "agent", name });
+  return name;
 }
 async function createOwnUnit(name) {
   const a = S.spec.agents[name];
@@ -484,7 +689,7 @@ async function createOwnUnit(name) {
 }
 function renameAgent(old, next) {
   if (next === old) return;
-  if (!NAME_RE.test(next) || S.spec.agents[next]) { $("save").textContent = !NAME_RE.test(next) ? "Names use letters, digits and underscores" : "That name is taken"; return inspect(); }
+  if (!NAME_RE.test(next) || S.spec.agents[next]) { $("save").textContent = !NAME_RE.test(next) ? "Use letters, digits, underscores" : "That name is taken"; return inspect(); }
   const agents = {};
   for (const [k, v] of Object.entries(S.spec.agents)) agents[k === old ? next : k] = v;
   S.spec.agents = agents;
@@ -512,13 +717,27 @@ async function assignModel(agent, m) {
   const ctx = Math.min(m.context_length || 4096, 4096);
   if (dir && S.units[dir]?.editable !== false) {
     try { S.units[dir] = await api("PUT", "/api/unit?agent=" + dir, { model: m.ref, context: S.units[dir]?.context || ctx }); delete a.model; }
-    catch (e) { $("save").textContent = "Not saved: " + e.message; return; }
+    catch (e) { $("save").textContent = "Not saved"; $("save").title = e.message; return; }
   } else a.model = m.ref;
   changed(); draw(); if (S.sel?.name === agent) inspect();
 }
 
+// A small starting point for people who have never used it: two agents, linked,
+// with the smallest model that fits and can chat.
+async function startExample() {
+  if (Object.keys(S.spec.agents).length) return;
+  const pick = S.models.filter((m) => !m.error && m.chat && (m.fit || []).some((f) => f.verdict === "fits"))
+    .sort((a, b) => a.size_bytes - b.size_bytes)[0];
+  const model = pick?.ref, context = pick ? Math.min(pick.context_length || 4096, 4096) : undefined;
+  const one = await addAgent(80, 100, { name: "researcher", prompt: "List three plain facts about the topic you are given, one per line. No introduction.", model, context });
+  const two = await addAgent(420, 100, { name: "writer", prompt: "Turn the notes you are given into one short, friendly paragraph.", model, context });
+  if (one && two) addEdge(one, two);
+  select(null); fitView();
+  if (!pick) $("save").textContent = "Drag a model onto each agent to finish";
+}
+
 // ---------- models panel ----------
-const VERDICT = { fits: ["ok", "fits"], tight: ["warn", "tight"], too_large: ["bad", "too large"], unknown: ["", "fit unknown"] };
+const VERDICT = { fits: ["ok", "Fits in memory"], tight: ["warn", "Tight fit"], too_large: ["bad", "Too large for this computer"], unknown: ["", "Fit unknown"] };
 function bestFit(m) {
   const rank = { too_large: 0, unknown: 1, tight: 2, fits: 3 };
   return (m.fit || []).reduce((best, f) => (!best || rank[f.verdict] > rank[best.verdict] ? f : best), null);
@@ -529,19 +748,20 @@ function renderModels() {
   box.replaceChildren();
   box.append(h("h2", {}, "Your models"));
   if (S.hw) {
-    const gpus = S.hw.devices.filter((d) => d.class === "gpu").map((d) => d.name + (d.memory_mb ? " " + Math.round(d.memory_mb / 1024) + " GB" : ""));
-    box.append(h("div", { class: "hw" }, Math.round(S.hw.total_ram_mb / 1024) + " GB memory · " + S.hw.cpu_cores + " cores · " + (gpus.length ? gpus.join(", ") : "no GPU detected")));
+    const gpus = S.hw.devices.filter((d) => d.class === "gpu").map((d) => d.name);
+    box.append(h("div", { class: "hw" }, Math.round(S.hw.total_ram_mb / 1024) + " GB memory · " + S.hw.cpu_cores + " cores · " + (gpus.length ? gpus.join(", ") : "no GPU")));
   }
-  box.append(textInput(modelFilter, (v) => { modelFilter = v.toLowerCase(); renderModelList(); }, { placeholder: "Filter models" }));
-  box.append(h("div", { id: "modelList", style: { marginTop: "10px" } }));
-  box.append(h("h2", { style: { marginTop: "18px" } }, "Folders searched"));
-  const dirs = h("div", { class: "small" });
+  box.append(textInput(modelFilter, (v) => { modelFilter = v.toLowerCase(); renderModelList(); }, { placeholder: "Search models" }));
+  box.append(h("div", { id: "modelList", style: { marginTop: "12px" } }));
+  const adv = h("details", {}, h("summary", {}, "Look in more folders"));
+  const dirs = h("div", { class: "dirs small" });
   S.fixedDirs.forEach((d) => dirs.append(h("div", { class: "mono muted" }, d)));
-  S.dirs.forEach((d) => dirs.append(h("div", { class: "row" }, h("span", { class: "mono", style: { flex: 1, wordBreak: "break-all" } }, d), h("button", { class: "btn", type: "button", onclick: () => saveDirs(S.dirs.filter((x) => x !== d)) }, "×"))));
-  if (!S.fixedDirs.length && !S.dirs.length) dirs.append(h("div", { class: "muted" }, "Ollama and models NexusRun downloaded. Add a folder of .gguf files to see more."));
-  box.append(dirs);
+  S.dirs.forEach((d) => dirs.append(h("div", { class: "row" }, h("span", { class: "mono grow", style: { wordBreak: "break-all" } }, d), h("button", { class: "icon", type: "button", "aria-label": "Remove", onclick: () => saveDirs(S.dirs.filter((x) => x !== d)) }, "×"))));
+  if (!S.fixedDirs.length && !S.dirs.length) dirs.append(h("div", { class: "hint" }, "Studio already looks at Ollama and the models NexusRun downloaded. Add a folder of .gguf files to see more."));
+  adv.append(dirs);
   const add = textInput("", () => {}, { placeholder: "/path/to/models" });
-  box.append(h("div", { class: "row", style: { marginTop: "8px", gap: "6px" } }, h("div", { style: { flex: 1 } }, add), h("button", { class: "btn", type: "button", onclick: () => { if (add.value.trim()) saveDirs([...S.dirs, add.value.trim()]); } }, "Add")));
+  adv.append(h("div", { class: "row", style: { marginTop: "8px" } }, h("div", { class: "grow" }, add), h("button", { class: "btn", type: "button", onclick: () => { if (add.value.trim()) saveDirs([...S.dirs, add.value.trim()]); } }, "Add")));
+  box.append(adv);
   renderModelList();
 }
 function renderModelList() {
@@ -549,35 +769,129 @@ function renderModelList() {
   if (!list) return;
   list.replaceChildren();
   const shown = S.models.filter((m) => !modelFilter || (m.ref + " " + (m.name || "")).toLowerCase().includes(modelFilter));
-  if (!shown.length) list.append(h("div", { class: "muted small" }, S.models.length ? "No match." : "No models found yet."));
+  if (!shown.length) list.append(h("div", { class: "hint" }, S.models.length ? "Nothing matches." : "No models found. Install one with Ollama, or add a folder below."));
   for (const m of shown) {
     const fit = bestFit(m), v = fit ? VERDICT[fit.verdict] : null;
-    const meta = h("div", { class: "meta" });
-    if (m.error) meta.append(h("span", { class: "pill bad", title: m.error }, "unreadable"));
+    const card = h("div", { class: "model" + (m.error ? " err" : ""), title: m.path }, h("div", { class: "name" }, m.ref));
+    if (m.error) card.append(h("div", { class: "meta" }, "Can't read this file"));
     else {
-      [m.parameters, m.quantization, (m.size_bytes / 1073741824).toFixed(1) + " GB"].filter(Boolean).forEach((t) => meta.append(h("span", { class: "pill" }, t)));
-      if (v) meta.append(h("span", { class: "pill " + v[0], title: "estimated memory " + Math.round(fit.need_mb / 1024 * 10) / 10 + " GB on " + fit.device }, fit.device + ": " + v[1]));
-      if (!m.chat) meta.append(h("span", { class: "pill warn", title: "No chat template in the file; it may not follow chat instructions" }, "no chat template"));
-      if (m.moe) meta.append(h("span", { class: "pill" }, "MoE"));
+      card.append(h("div", { class: "meta" }, [m.parameters, m.quantization, (m.size_bytes / 1073741824).toFixed(1) + " GB"].filter(Boolean).join(" · ")));
+      if (v) card.append(h("div", { class: "fit " + v[0], title: "Estimated memory " + (fit.need_mb / 1024).toFixed(1) + " GB on " + fit.device.toUpperCase() }, h("span", { class: "dot" }), v[1]));
+      if (!m.chat) card.append(h("div", { class: "tag" }, "No chat format in the file; it may ignore instructions."));
+      const t = S.tests[m.ref];
+      const btn = h("button", { class: "btn quiet", type: "button", disabled: S.busy, onclick: () => testModel(m) }, t?.state === "testing" ? "Testing…" : t ? "Test again" : "Test this model");
+      btn.addEventListener("pointerdown", (e) => e.stopPropagation()); // a click on Test must not start a drag
+      const row = h("div", { class: "testrow" }, btn);
+      if (t?.state === "testing") row.append(h("span", { class: "spin" }), h("span", { class: "result" }, "Loading the model…"));
+      else if (t?.ok) row.append(h("span", { class: "result ok", title: "It replied: " + t.reply }, "✓ Works · " + (t.tokens_per_sec || 0).toFixed(1) + " tok/s · answered in " + secs(t.took_ms || 0) + " · " + (t.device || "").toUpperCase()));
+      else if (t) row.append(h("span", { class: "result bad", title: t.error }, "✗ " + clip(t.error || "Did not work", 60)));
+      card.append(row);
+      card.addEventListener("pointerdown", (e) => startDrag(e, { type: "model", model: m }, m.name || m.ref));
     }
-    const el = h("div", { class: "model" + (m.error ? " err" : ""), title: m.path }, h("div", { class: "name" }, m.ref), meta);
-    if (!m.error) {
-      el.addEventListener("pointerdown", (e) => startDrag(e, { type: "model", model: m }, m.name || m.ref));
-    }
-    list.append(el);
+    list.append(card);
   }
 }
+async function testModel(m) {
+  if (S.busy) return;
+  S.busy = true; S.tests[m.ref] = { state: "testing" }; renderModelList();
+  try { S.tests[m.ref] = await api("POST", "/api/test-model", { ref: m.ref }); }
+  catch (e) { S.tests[m.ref] = { ok: false, error: e.message }; }
+  S.busy = false; renderModelList();
+}
 async function refreshModels() {
-  try {
-    const r = await api("GET", "/api/models");
-    S.models = r.models; S.hw = r.hardware;
-  } catch (e) { S.models = []; }
+  try { const r = await api("GET", "/api/models"); S.models = r.models; S.hw = r.hardware; } catch { S.models = []; }
   renderModels();
 }
 async function saveDirs(dirs) {
   try { const r = await api("PUT", "/api/settings", { model_dirs: dirs }); S.dirs = r.model_dirs; $("save").textContent = ""; await refreshModels(); }
   catch (e) { $("save").textContent = e.message; }
 }
+
+// ---------- run ----------
+function openRun() {
+  if (S.broken) return;
+  $("run").hidden = false; $("runText").focus();
+  renderTrace(); fitView();
+}
+function renderTrace() {
+  const box = $("trace"), run = S.run;
+  box.replaceChildren();
+  $("runGo").hidden = !!run?.running; $("runStop").hidden = !run?.running;
+  if (!run) { $("runStatus").textContent = ""; box.append(h("p", { class: "hint" }, "Each agent appears here as it works, with what it was given and what it answered.")); return; }
+  $("runStatus").textContent = run.running ? "Running · " + secs(Date.now() - run.start) : run.ok === false ? "Stopped" : "Finished in " + secs(run.took ?? 0);
+  for (const name of run.order) {
+    const st = run.steps[name];
+    const mark = st.state === "running" ? h("span", { class: "spin" }) : h("span", { class: "state " + st.state }, st.state === "done" ? "✓" : st.state === "failed" ? "✕" : st.state === "skipped" ? "–" : "·");
+    const head = h("div", { class: "head" }, mark, h("b", {}, name));
+    const bits = [];
+    if (st.took_ms !== undefined && st.state === "done") bits.push(secs(st.took_ms));
+    if (st.tokens) bits.push(st.tokens + " tokens");
+    if (st.tokens_per_sec) bits.push(st.tokens_per_sec.toFixed(1) + " tok/s");
+    if (st.device) bits.push(st.device.toUpperCase());
+    if (st.state === "skipped") bits.push("skipped");
+    if (st.state === "running") bits.push("working…");
+    head.append(h("span", { class: "stats" }, bits.join(" · ")));
+    const card = h("div", { class: "step" + (st.state === "failed" ? " err" : "") }, head);
+    if (st.state === "skipped" && st.reason) card.append(h("div", { class: "hint" }, st.reason));
+    if (st.state === "failed") card.append(h("pre", {}, st.error || "It failed."));
+    if (st.output) card.append(h("div", { class: "lab" }, "Answer"), h("pre", {}, st.output));
+    if (st.prompt) card.append(h("details", {}, h("summary", {}, "What it was given"), h("pre", {}, st.prompt)));
+    box.append(card);
+  }
+  if (run.error && !run.steps[run.failedAgent || ""]) box.append(h("div", { class: "step err" }, h("pre", {}, run.error)));
+}
+function onEvent(ev) {
+  const run = S.run;
+  switch (ev.event) {
+    case "start": run.order = ev.order || []; run.order.forEach((n) => (run.steps[n] = { state: "waiting" })); break;
+    case "route": run.fired[ev.from + ">" + ev.to] = ev.fired; break;
+    case "agent_start": Object.assign(run.steps[ev.agent] ||= {}, { state: "running", prompt: ev.prompt }); if (!run.order.includes(ev.agent)) run.order.push(ev.agent); break;
+    case "agent_done": Object.assign(run.steps[ev.agent], { state: "done", output: ev.output, tokens: ev.tokens, tokens_per_sec: ev.tokens_per_sec, device: ev.device, took_ms: ev.took_ms }); break;
+    case "agent_skipped": run.steps[ev.agent] = { state: "skipped", reason: ev.reason }; break;
+    case "agent_failed": Object.assign(run.steps[ev.agent] ||= {}, { state: "failed", error: ev.error }); run.failedAgent = ev.agent; break;
+    case "done": run.running = false; run.ok = ev.ok; run.took = ev.took_ms; run.error = ev.ok ? "" : ev.error; break;
+  }
+  decorate(); renderTrace();
+}
+let runTick = null;
+async function runWorkflow() {
+  if (S.busy || S.run?.running) return;
+  if (S.diags.length) { S.problemsOpen = true; renderProblems(); $("runStatus").textContent = "Fix the problems first"; return; }
+  if (!Object.keys(S.spec.agents).length) { $("runStatus").textContent = "Add an agent first"; return; }
+  await commit(); // the run reads the saved file
+  const ctl = new AbortController();
+  S.busy = true; renderModelList();
+  S.run = { order: Object.keys(S.spec.agents), steps: {}, fired: {}, running: true, start: Date.now(), abort: ctl };
+  S.run.order.forEach((n) => (S.run.steps[n] = { state: "waiting" }));
+  decorate(); renderTrace();
+  clearInterval(runTick); runTick = setInterval(() => { if (S.run?.running) $("runStatus").textContent = "Running · " + secs(Date.now() - S.run.start); }, 500);
+  try {
+    const r = await fetch("/api/run", { method: "POST", signal: ctl.signal, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ input: $("runText").value }) });
+    if (!r.ok) { let d = {}; try { d = await r.json(); } catch { /* no body */ } throw new Error(d.error || "HTTP " + r.status); }
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (line) { try { onEvent(JSON.parse(line)); } catch { /* ignore a partial line */ } }
+      }
+    }
+  } catch (e) {
+    if (S.run) { S.run.running = false; S.run.ok = false; S.run.error = e.name === "AbortError" ? "Stopped." : e.message; }
+  } finally {
+    if (S.run) S.run.running = false;
+    S.busy = false; clearInterval(runTick); decorate(); renderTrace(); renderModelList();
+  }
+}
+$("runBtn").addEventListener("click", () => { if ($("run").hidden) openRun(); else $("runText").focus(); });
+$("closeRun").addEventListener("click", () => { if (S.run?.running) S.run.abort.abort(); $("run").hidden = true; S.run = null; fitView(); });
+$("runGo").addEventListener("click", runWorkflow);
+$("runStop").addEventListener("click", () => S.run?.abort.abort());
+$("runText").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runWorkflow(); });
 
 // ---------- pointer interaction ----------
 const svg = $("svg");
@@ -587,7 +901,6 @@ function world(ev) {
 }
 function overStage(ev) { const r = $("stage").getBoundingClientRect(); return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom; }
 
-// A drag that starts in a palette item and ends on the canvas.
 function startDrag(ev, payload, label) {
   if (ev.button !== 0) return;
   const ghost = $("ghost");
@@ -619,7 +932,6 @@ svg.addEventListener("pointerdown", (e) => {
   if (edge) { select({ kind: "edge", i: +edge.dataset.edge }); return; }
   startPan(e);
 });
-
 function startLink(e, from) {
   e.preventDefault();
   const tmp = $("tmp"), a = outPt(from);
@@ -654,16 +966,19 @@ function startPan(e) {
   const up = () => { svg.classList.remove("panning"); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
   window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
 }
-svg.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  const r = svg.getBoundingClientRect(), k = Math.min(2, Math.max(0.3, S.view.k * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
-  const px = e.clientX - r.left, py = e.clientY - r.top;
+function zoomBy(f, cx, cy) {
+  const r = svg.getBoundingClientRect(), k = Math.min(2, Math.max(0.3, S.view.k * f));
+  const px = cx ?? r.width / 2, py = cy ?? r.height / 2;
   S.view.x = px - ((px - S.view.x) / S.view.k) * k; S.view.y = py - ((py - S.view.y) / S.view.k) * k; S.view.k = k;
   $("vp").setAttribute("transform", `translate(${S.view.x},${S.view.y}) scale(${S.view.k})`);
-}, { passive: false });
+}
+svg.addEventListener("wheel", (e) => { e.preventDefault(); const r = svg.getBoundingClientRect(); zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+$("zoomIn").addEventListener("click", () => zoomBy(1.2));
+$("zoomOut").addEventListener("click", () => zoomBy(1 / 1.2));
 
 window.addEventListener("keydown", (e) => {
-  if ((e.key !== "Delete" && e.key !== "Backspace") || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+  if (e.key === "Escape") { if (!$("welcome").hidden) closeWelcome(); return; }
+  if ((e.key !== "Delete" && e.key !== "Backspace") || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || !$("welcome").hidden) return;
   if (S.sel?.kind === "agent") { e.preventDefault(); deleteAgent(S.sel.name); }
   else if (S.sel?.kind === "edge") { e.preventDefault(); deleteEdge(S.sel.i); }
 });
@@ -673,18 +988,33 @@ function fitView() {
   if (!names.length) { S.view = { x: 40, y: 40, k: 1 }; return draw(); }
   const xs = names.map((n) => S.layout[n].x), ys = names.map((n) => S.layout[n].y);
   const minX = Math.min(...xs), maxX = Math.max(...xs) + W, minY = Math.min(...ys), maxY = Math.max(...ys) + H;
-  const r = svg.getBoundingClientRect(), pad = 60;
-  const k = Math.min(1.2, Math.max(0.3, Math.min((r.width - pad * 2) / (maxX - minX), (r.height - pad * 2) / (maxY - minY))));
-  S.view = { k, x: (r.width - (maxX - minX) * k) / 2 - minX * k, y: (r.height - (maxY - minY) * k) / 2 - minY * k };
+  // Keep the agents clear of the Run sheet when it is open.
+  const r = svg.getBoundingClientRect(), pad = 70, avail = r.height - ($("run").hidden ? 0 : $("run").getBoundingClientRect().height + 12);
+  const k = Math.min(1.1, Math.max(0.3, Math.min((r.width - pad * 2) / (maxX - minX), (avail - pad * 2) / (maxY - minY))));
+  S.view = { k, x: (r.width - (maxX - minX) * k) / 2 - minX * k, y: (avail - (maxY - minY) * k) / 2 - minY * k };
   draw();
 }
 
+// ---------- welcome ----------
+function openWelcome() { $("welcome").hidden = false; $("wGo").focus(); }
+function closeWelcome() {
+  if ($("wNever").checked) pref.set("welcome", "hidden");
+  $("welcome").hidden = true;
+}
+$("helpBtn").addEventListener("click", () => { $("wNever").checked = pref.get("welcome") === "hidden"; openWelcome(); });
+$("wGo").addEventListener("click", closeWelcome);
+$("wExample").addEventListener("click", () => { closeWelcome(); startExample(); });
+$("welcome").addEventListener("pointerdown", (e) => { if (e.target === $("welcome")) closeWelcome(); });
+
 // ---------- startup ----------
-$("addAgent").addEventListener("pointerdown", (e) => startDrag(e, { type: "agent" }, "＋ Agent"));
 function addAtCentre() { const r = svg.getBoundingClientRect(); addAgent((r.width / 2 - S.view.x) / S.view.k - W / 2, (r.height / 2 - S.view.y) / S.view.k - H / 2); }
+$("addAgent").addEventListener("pointerdown", (e) => startDrag(e, { type: "agent" }, "＋ Agent"));
 $("addAgent").addEventListener("click", (e) => { if (e.detail === 0) addAtCentre(); }); // keyboard activation
+$("emptyAdd").addEventListener("click", addAtCentre);
+$("emptyExample").addEventListener("click", startExample);
 $("fit").addEventListener("click", fitView);
-$("showYaml").addEventListener("click", () => { $("yaml").hidden = !$("yaml").hidden; renderYaml(); });
+$("yamlBtn").addEventListener("click", () => { $("yaml").hidden = !$("yaml").hidden; renderYaml(); });
+$("closeYaml").addEventListener("click", () => ($("yaml").hidden = true));
 $("copyYaml").addEventListener("click", () => navigator.clipboard?.writeText(S.yaml).catch(() => {}));
 
 function newSpec(name) {
@@ -692,24 +1022,26 @@ function newSpec(name) {
 }
 
 async function start() {
-  if (!token) { $("health").textContent = "no access token"; $("health").className = "pill bad"; $("inspector").textContent = "Open the link that `nexus studio` printed; it carries the access token."; return; }
+  await redeemCode();
+  if (!token) { $("health").textContent = "No access token"; $("health").className = "chip bad"; $("inspector").textContent = redeemError || "Open the link that `nexus studio` printed; it carries the access token."; return; }
   let p;
-  try { p = await api("GET", "/api/project"); } catch (e) { $("health").textContent = "offline"; $("health").className = "pill bad"; $("inspector").textContent = e.message; return; }
+  try { p = await api("GET", "/api/project"); } catch (e) { $("health").textContent = "Offline"; $("health").className = "chip bad"; $("inspector").textContent = e.message; return; }
   S.project = p; S.layout = p.layout || {}; S.dirs = p.model_dirs || []; S.fixedDirs = p.fixed_dirs || [];
-  $("dir").textContent = p.dir; $("dir").title = p.dir;
+  $("crumb").textContent = p.name; $("crumb").title = p.dir;
   if (p.exists) {
     const rep = await api("POST", "/api/parse", { yaml: p.yaml });
     S.diags = rep.diagnostics;
     if (!rep.spec) {
       // Not readable as a workflow: show why, and leave the file alone.
-      S.broken = true; S.spec = newSpec(p.name); S.yaml = p.yaml;
-      $("stage").append(h("div", { id: "banner" }, "nexus-compose.yaml cannot be read, so Studio will not change it. Fix it in your editor (see the problems below), then reload."));
+      S.broken = true; S.spec = newSpec(p.name); S.yaml = p.yaml; S.problemsOpen = true;
+      $("stage").append(h("div", { id: "banner" }, "nexus-compose.yaml cannot be read, so Studio will not change it. Fix it in your editor, then reload."));
     } else { S.spec = rep.spec; S.yaml = p.yaml; }
   } else { S.spec = newSpec(p.name); }
   S.spec.agents = S.spec.agents || {}; S.spec.routing = S.spec.routing || [];
   for (const n of Object.keys(S.spec.agents)) { const d = ownDir(n); if (d) await loadUnit(d); }
   autoPlace(); draw(); renderProblems(); renderYaml(); inspect();
   if (Object.keys(S.spec.agents).length) fitView();
+  if (pref.get("welcome") !== "hidden") openWelcome();
   await refreshModels();
 }
 start();

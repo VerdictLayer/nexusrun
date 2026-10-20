@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -30,6 +31,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -79,10 +81,30 @@ type project struct {
 	store     *store.Store
 	fixedDirs []string
 	mu        sync.Mutex // serialises writes
+	busy      atomic.Bool
+	exe       string // the program that runs workflows and tests: this executable
+
+	token string
+	// code is a one-time stand-in for the token, for links that end up on a
+	// command line where other accounts can read them. See exchange.
+	code     string
+	codeUsed bool
+	codeBy   time.Time
 }
 
 // Serve runs the editor until ctx ends. onReady receives the link to open.
-func Serve(ctx context.Context, o Options, onReady func(link string)) error {
+// Links are the ways to open the editor.
+type Links struct {
+	// Token carries the session token. Show it only to the person at the terminal.
+	Token string
+	// Code works once, within a couple of minutes, and is exchanged for the
+	// token by the page. It is safe to pass to another program.
+	Code string
+}
+
+const codeLifetime = 2 * time.Minute
+
+func Serve(ctx context.Context, o Options, onReady func(Links)) error {
 	if err := server.RequireLoopback(o.Addr); err != nil {
 		return err
 	}
@@ -100,14 +122,22 @@ func Serve(ctx context.Context, o Options, onReady func(link string)) error {
 	if err != nil {
 		return err
 	}
-	p := &project{root: root, store: o.Store, fixedDirs: o.ModelDirs}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	code, err := server.NewSessionToken()
+	if err != nil {
+		return err
+	}
+	p := &project{root: root, store: o.Store, fixedDirs: o.ModelDirs, exe: exe, token: token, code: code[:32], codeBy: time.Now().Add(codeLifetime)}
 
 	ln, err := net.Listen("tcp", o.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", o.Addr, err)
 	}
 	srv := &http.Server{
-		Handler:           server.Protect(p.routes(), ln.Addr().String(), token),
+		Handler:           server.ProtectExcept(p.routes(), ln.Addr().String(), token, "/api/exchange"),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
@@ -117,8 +147,12 @@ func Serve(ctx context.Context, o Options, onReady func(link string)) error {
 		_ = srv.Shutdown(shutdown)
 	}()
 	if onReady != nil {
-		// The token rides in the fragment, which browsers never send to a server.
-		onReady(fmt.Sprintf("http://%s/#token=%s", ln.Addr(), token))
+		// Fragments are never sent to a server. The token link is for the terminal;
+		// the code link is for programs that put it on a command line.
+		onReady(Links{
+			Token: fmt.Sprintf("http://%s/#token=%s", ln.Addr(), token),
+			Code:  fmt.Sprintf("http://%s/#code=%s", ln.Addr(), p.code),
+		})
 	}
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
@@ -143,6 +177,9 @@ func (p *project) routes() http.Handler {
 	mux.HandleFunc("PUT /api/layout", p.putLayout)
 	mux.HandleFunc("GET /api/models", p.models)
 	mux.HandleFunc("PUT /api/settings", p.putSettings)
+	mux.HandleFunc("POST /api/exchange", p.exchange)
+	mux.HandleFunc("POST /api/run", p.run)
+	mux.HandleFunc("POST /api/test-model", p.testModel)
 	return mux
 }
 
@@ -160,6 +197,29 @@ func contentSecurityPolicy(html []byte) string {
 	}
 	return "default-src 'none'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; " +
 		"script-src " + hash(`(?s)<script>(.*?)</script>`) + "; style-src " + hash(`(?s)<style>(.*?)</style>`)
+}
+
+// exchange trades the one-time code for the session token. A link with the token
+// in it would be readable in the process list by other accounts on this machine
+// while a browser is starting; the code is useless a moment later.
+func (p *project) exchange(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Code string `json:"code"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	p.mu.Lock()
+	valid := !p.codeUsed && time.Now().Before(p.codeBy) && subtle.ConstantTimeCompare([]byte(in.Code), []byte(p.code)) == 1
+	if valid {
+		p.codeUsed = true
+	}
+	p.mu.Unlock()
+	if !valid {
+		fail(w, http.StatusForbidden, "this link was already used or has expired; use the link printed in the terminal")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": p.token})
 }
 
 // ---- helpers ---------------------------------------------------------------
