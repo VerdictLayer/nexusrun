@@ -265,3 +265,29 @@ func TestPinnedDetectsFloatingRefs(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSourceRejectsHostileSpecs(t *testing.T) {
+	for _, bad := range []string{
+		"github:../../etc/passwd",
+		"github:../x/y",
+		"github:org/..",
+		"github:org/repo#../../x",
+		"github:org/repo#-oProxyCommand=x",
+		"github:org/repo#main/../../escape",
+		"npm:git+https://evil.example/pkg.git",
+		"npm:https://evil.example/pkg.tgz",
+		"npm:file:../../local",
+		"npm:--registry=https://evil.example",
+		"npm:pkg@git+ssh://evil.example/x",
+		"npm:@scope/../pkg",
+	} {
+		if _, err := ParseSource(bad); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+	for _, good := range []string{"npm:left-pad@1.3.0", "npm:@scope/name@2.0.0-beta.1", "github:org/repo.js#v1.2.3/src/server"} {
+		if _, err := ParseSource(good); err != nil {
+			t.Errorf("%q should be accepted: %v", good, err)
+		}
+	}
+}

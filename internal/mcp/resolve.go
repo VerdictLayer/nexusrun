@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/verdictlayer/nexusrun/internal/store"
@@ -59,6 +60,30 @@ func (s Source) Pinned() bool {
 	}
 }
 
+// Source specs come from a unit's manifest, which is untrusted input. Org,
+// repo and ref become path elements and command arguments, and an npm spec is
+// handed to npm, so each is restricted to a plain name: no separators, no
+// leading "-", and no URL, git or file specs that npm would fetch from
+// elsewhere.
+var (
+	githubOrgPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
+	githubRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+	githubRefPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
+	npmSpecPattern    = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9._+-]*)?$`)
+)
+
+func validSubpath(p string) bool {
+	if p == "" {
+		return true
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." || strings.ContainsAny(seg, "\\\x00") {
+			return false
+		}
+	}
+	return !strings.HasPrefix(p, "/")
+}
+
 // ParseSource decodes a source spec.
 //
 //	github:org/repo#ref/path…    clone at ref, run from path
@@ -86,6 +111,10 @@ func ParseSource(raw string) (Source, error) {
 				s.Path = sub
 			}
 		}
+		if !githubOrgPattern.MatchString(s.Org) || !githubRepoPattern.MatchString(s.Repo) || s.Repo == "." || s.Repo == ".." ||
+			!githubRefPattern.MatchString(s.Ref) || !validSubpath(s.Path) {
+			return s, fmt.Errorf("github source %q has an invalid organization, repository, ref or path", raw)
+		}
 		return s, nil
 
 	case strings.HasPrefix(raw, "file://"):
@@ -101,6 +130,9 @@ func ParseSource(raw string) (Source, error) {
 		s.Package = strings.TrimPrefix(raw, "npm:")
 		if s.Package == "" {
 			return s, fmt.Errorf("npm source needs a package name, got %q", raw)
+		}
+		if !npmSpecPattern.MatchString(s.Package) {
+			return s, fmt.Errorf("npm source %q must be a registry package name with an optional @version", raw)
 		}
 		return s, nil
 
@@ -193,7 +225,7 @@ func (s Source) Install(ctx context.Context, st *store.Store, force bool, logf f
 		logf("cloning %s at %s", url, s.Ref)
 		// A shallow clone of one ref: MCP servers are small and their
 		// history is not what is being shipped.
-		cmd := exec.CommandContext(ctx, git, "clone", "--depth", "1", "--branch", s.Ref, url, dir)
+		cmd := exec.CommandContext(ctx, git, "clone", "--depth", "1", "--branch", s.Ref, "--", url, dir)
 		if out, cerr := cmd.CombinedOutput(); cerr != nil {
 			return fmt.Errorf("clone %s: %w\n  %s", url, cerr, tailLines(string(out), 5))
 		}
@@ -210,7 +242,10 @@ func (s Source) Install(ctx context.Context, st *store.Store, force bool, logf f
 			return err
 		}
 		logf("installing %s with npm", s.Package)
-		cmd := exec.CommandContext(ctx, npm, "install", "--no-fund", "--no-audit", "--prefix", dir, s.Package)
+		cmd := exec.CommandContext(ctx, npm, "install", "--no-fund", "--no-audit",
+			// Install scripts would run outside the sandbox, with the user's
+			// full privileges, before the unit's capabilities apply.
+			"--ignore-scripts", "--prefix", dir, "--", s.Package)
 		if out, cerr := cmd.CombinedOutput(); cerr != nil {
 			return fmt.Errorf("npm install %s: %w\n  %s", s.Package, cerr, tailLines(string(out), 8))
 		}
