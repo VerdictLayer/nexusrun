@@ -333,6 +333,15 @@ starts, stored in `daemon.token` (mode 0600) in the NexusRun home, and printed
 once in the console link (`http://127.0.0.1:7717/#token=…`), which the browser
 keeps for that tab only. It also protects itself from web pages open in your
 browser, which can otherwise reach loopback services:
+#### `nexus studio [dir]`
+Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
+| `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
+| `--no-browser` | `false` | Print the link instead of opening a browser |
+
 
 - The `Host` header must name the server's own loopback address and port, so a
   site that re-points its DNS name at `127.0.0.1` is refused.

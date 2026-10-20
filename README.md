@@ -394,6 +394,7 @@ instead of silently doing nothing.
 | `nexus logs` | Run history and captured output |
 | `nexus serve` | Web console + warm-model daemon |
 
+| `nexus studio` | Build a workflow on a canvas: drag agents, models and links |
 Running a directory directly (`nexus run ./my-agent`) skips packaging — the
 fast inner loop while developing.
 
@@ -409,6 +410,7 @@ fast inner loop while developing.
 | [docs/COMPOSE.md](docs/COMPOSE.md) | Multi-agent workflows: the graph, routing conditions, transforms, and the shared state bus |
 | [docs/AUTOMODEL.md](docs/AUTOMODEL.md) | Declaring what kind of model a unit needs and letting each machine measure which one clears the bar |
 | [docs/TOOLS.md](docs/TOOLS.md) | Declaring tools, the agent loop that executes them, and per-tool capability narrowing |
+| [docs/STUDIO.md](docs/STUDIO.md) | Build a workflow on a canvas with your local models |
 | [docs/MCP.md](docs/MCP.md) | Declaring MCP servers as versioned, sandboxed dependencies of a unit |
 | [docs/SECRETS.md](docs/SECRETS.md) | Keeping credentials out of the artifact: the encrypted store, device scoping, rotation, audit |
 | [docs/CHECKPOINT.md](docs/CHECKPOINT.md) | Sessions an agent remembers, and moving that state to another machine |
