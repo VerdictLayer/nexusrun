@@ -208,11 +208,11 @@ func Serve(ctx context.Context, s *store.Store, addr string, pool *daemon.Pool) 
 		w.Write(data)
 	})
 
-	// The guard, /api/run and the install endpoints all
-	// assume a loopback listener. Binding anything else would put them on
-	// the network behind a single shared token, so refuse rather than warn.
-	if host, _, serr := net.SplitHostPort(addr); serr != nil || !isLoopbackHost(host) {
-		return fmt.Errorf("refusing to listen on %q: the console is for this machine only and binds to a loopback address (for example 127.0.0.1:7717)", addr)
+	// The guard, /api/run and the install endpoints all assume a loopback
+	// listener. Binding anything else would put them on the network behind a
+	// single shared token, so refuse rather than warn.
+	if err := RequireLoopback(addr); err != nil {
+		return err
 	}
 
 	token, err := newToken(s.Root)
