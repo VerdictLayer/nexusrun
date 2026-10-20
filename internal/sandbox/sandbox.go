@@ -3,9 +3,10 @@ package sandbox
 // Policy describes what a unit is allowed to touch. It is derived from
 // the unit's declared `capabilities:` — anything not declared is denied.
 type Policy struct {
-	// AllowNetwork permits outbound TCP. Landlock governs TCP only, so
-	// UDP (including DNS) is not restricted by this flag; treat it as
-	// "cannot open TCP connections", not as a complete network jail.
+	// AllowNetwork permits network sockets. When false, a seccomp filter
+	// refuses every socket except local (AF_UNIX) and netlink ones, so a
+	// unit cannot open TCP, UDP (including DNS) or raw connections on any
+	// kernel. Abstract AF_UNIX sockets are not scoped.
 	AllowNetwork bool
 
 	// ReadOnlyPaths are readable but not writable, in addition to the

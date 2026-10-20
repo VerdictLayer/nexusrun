@@ -9,7 +9,7 @@ not by convention.
 
 ```yaml
 capabilities:
-  - network    # allow outbound TCP
+  - network    # allow network access
   - storage    # allow read/write in the user's home directory
 ```
 
@@ -21,7 +21,7 @@ write yourself.
 
 Measured on Linux 6.17 with Landlock ABI v7:
 
-| Unit declares | Write inside unit dir | Write to `$HOME` | Outbound TCP |
+| Unit declares | Write inside unit dir | Write to `$HOME` | Network sockets (TCP, UDP, DNS) |
 |---|---|---|---|
 | *(nothing)* | allowed | **blocked** | **blocked** |
 | `network` | allowed | **blocked** | allowed |
@@ -62,9 +62,15 @@ NEXUS_SANDBOXED    "true" when confinement is active
 - **Linux only.** macOS Seatbelt and Windows AppContainer are not implemented.
   On those platforms `nexus run` *refuses* to run a script unit rather than
   running it unconfined; `--no-sandbox` overrides, and says so.
-- **TCP only.** Landlock's network rules cover TCP connect and bind. UDP,
-  including DNS, is not restricted. Treat `network` as "cannot open TCP
-  connections", not as a complete network jail.
+- **Network is all-or-nothing.** Without `network`, a seccomp filter makes the
+  kernel refuse every socket except local (`AF_UNIX`) and netlink ones, so TCP,
+  UDP, DNS, raw and packet sockets all fail with `EACCES`, on any kernel
+  version. It is not a partial restriction: with `network`, a unit can reach
+  anything the host can. Abstract `AF_UNIX` sockets (for example a desktop
+  session bus) are not scoped.
+- **Linux amd64 and arm64.** The socket filter is implemented for these two
+  architectures; on any other, a unit without `network` is refused rather than
+  run without the filter.
 - **No CPU, memory, or process limits.** A unit can still spin, allocate, or
   fork. Use cgroups or a VM if you need resource bounds.
 - **No protection against a malicious interpreter.** If a unit can write to a
@@ -80,7 +86,7 @@ only feed a prompt to a model — so they are not sandboxed.
 Landlock support is reported by:
 
 ```bash
-nexus doctor    # → Sandboxing: Landlock ABI v7 (filesystem + network)
+nexus doctor    # → Sandboxing: Landlock ABI v7 (filesystem + TCP) with a seccomp socket filter
 ```
 
 To confirm enforcement rather than trusting the label, write a unit that

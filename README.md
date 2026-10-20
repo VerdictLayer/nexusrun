@@ -143,7 +143,7 @@ Backend capability
                                 version 0.10.1
   onnxruntime      unavailable  onnxruntime shared library not found (needed for NPU execution)
 
-Sandboxing:     Landlock ABI v8 (filesystem + network)
+Sandboxing:     Landlock ABI v8 (filesystem + TCP) with a seccomp socket filter
 Usable devices: GPU, CPU
 ```
 

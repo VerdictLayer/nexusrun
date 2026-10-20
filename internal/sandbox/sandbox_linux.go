@@ -36,9 +36,9 @@ func Describe() string {
 		return "unavailable (kernel lacks Landlock)"
 	}
 	if v >= 4 {
-		return fmt.Sprintf("Landlock ABI v%d (filesystem + network)", v)
+		return fmt.Sprintf("Landlock ABI v%d (filesystem + TCP) with a seccomp socket filter", v)
 	}
-	return fmt.Sprintf("Landlock ABI v%d (filesystem only; network rules need ABI 4+)", v)
+	return fmt.Sprintf("Landlock ABI v%d (filesystem) with a seccomp socket filter for the network", v)
 }
 
 // existing filters a path list down to what is actually present.
@@ -138,9 +138,14 @@ func Apply(p Policy) error {
 	}
 
 	if !p.AllowNetwork {
-		// With no ConnectTCP rules, all outbound TCP is denied.
-		// Landlock governs TCP only; see Policy.AllowNetwork.
+		// With no ConnectTCP rules, all outbound TCP is denied on kernels
+		// with Landlock ABI 4+. Older kernels ignore this (BestEffort), and
+		// Landlock never covers UDP, so the seccomp filter below is what
+		// actually guarantees there is no network. It fails closed.
 		if err := landlock.V5.BestEffort().RestrictNet(); err != nil {
+			return fmt.Errorf("apply network policy: %w", err)
+		}
+		if err := denyNetwork(); err != nil {
 			return fmt.Errorf("apply network policy: %w", err)
 		}
 	}
