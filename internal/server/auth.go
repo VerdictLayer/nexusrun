@@ -80,8 +80,9 @@ func Proof(token, nonce string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// requireToken protects every /api/ route except the handshake.
-func requireToken(next http.Handler, token string) http.Handler {
+// requireToken protects every /api/ route except the handshake and any exact
+// paths the caller lists as public.
+func requireToken(next http.Handler, token string, public ...string) http.Handler {
 	want := []byte(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/handshake" {
@@ -93,6 +94,12 @@ func requireToken(next http.Handler, token string) http.Handler {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.Write([]byte(Proof(token, nonce)))
 			return
+		}
+		for _, p := range public {
+			if r.URL.Path == p {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")

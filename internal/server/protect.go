@@ -16,6 +16,14 @@ func Protect(h http.Handler, listenAddr, token string) http.Handler {
 	return guard(requireToken(h, token), listenAddr)
 }
 
+// ProtectExcept is Protect, except that the exact paths in public skip the token
+// check. They are still behind the Host and Origin guard. It exists for a
+// one-time code exchange, the only call that has to work before the page has a
+// token.
+func ProtectExcept(h http.Handler, listenAddr, token string, public ...string) http.Handler {
+	return guard(requireToken(h, token, public...), listenAddr)
+}
+
 // NewSessionToken returns a random token that lives only in memory, for servers
 // that are tied to one process and need no file.
 func NewSessionToken() (string, error) {
