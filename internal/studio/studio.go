@@ -67,29 +67,51 @@ var agentName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`)
 
 // Options configures a Studio server.
 type Options struct {
-	// Dir is the project folder: where nexus-compose.yaml lives.
-	Dir   string
-	Addr  string
-	Store *store.Store
+	// Dir is the project folder: where nexus-compose.yaml lives. Exactly one of
+	// Dir and Workspace is set.
+	Dir string
+	// Workspace is a folder whose subfolders are projects. The page offers them
+	// in a list and can create new ones there; nothing outside it is opened.
+	Workspace string
+	Addr      string
+	Store     *store.Store
+	// QuitWhenClosed stops the server once the page has been closed, for a
+	// launcher that has no terminal to press Ctrl+C in.
+	QuitWhenClosed bool
 	// ModelDirs are folders to search for models in addition to the ones saved
 	// in settings (from flags or the environment).
 	ModelDirs []string
 }
 
+// project is one folder being edited. What every project shares (the access
+// token, the one-run-at-a-time slot, the model list) lives in shared.
 type project struct {
-	root      string
+	root string
+	mu   sync.Mutex // serialises writes to this folder
+	*shared
+}
+
+type shared struct {
 	store     *store.Store
 	fixedDirs []string
-	mu        sync.Mutex // serialises writes
 	busy      atomic.Bool
 	exe       string // the program that runs workflows and tests: this executable
+	token     string
 
-	token string
+	// ws is the workspace folder, or "" when a single folder was given.
+	ws       string
+	wsMu     sync.Mutex
+	projects map[string]*project
+
 	// code is a one-time stand-in for the token, for links that end up on a
 	// command line where other accounts can read them. See exchange.
+	codeMu   sync.Mutex
 	code     string
 	codeUsed bool
 	codeBy   time.Time
+
+	settingsMu sync.Mutex
+	live       liveness
 }
 
 // Serve runs the editor until ctx ends. onReady receives the link to open.
@@ -108,15 +130,34 @@ func Serve(ctx context.Context, o Options, onReady func(Links)) error {
 	if err := server.RequireLoopback(o.Addr); err != nil {
 		return err
 	}
-	root, err := filepath.Abs(o.Dir)
-	if err != nil {
-		return err
+	if (o.Dir == "") == (o.Workspace == "") {
+		return errors.New("give either a project folder or a workspace folder")
 	}
-	if root, err = filepath.EvalSymlinks(root); err != nil {
-		return err
+	resolveDir := func(d string) (string, error) {
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			return "", err
+		}
+		if abs, err = filepath.EvalSymlinks(abs); err != nil {
+			return "", err
+		}
+		if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+			return "", fmt.Errorf("%s is not a folder", d)
+		}
+		return abs, nil
 	}
-	if info, err := os.Stat(root); err != nil || !info.IsDir() {
-		return fmt.Errorf("%s is not a folder", o.Dir)
+	var root, ws string
+	var err error
+	if o.Workspace != "" {
+		// A workspace is made on first use, so a launcher never fails for want of it.
+		if err := os.MkdirAll(o.Workspace, 0o755); err != nil {
+			return err
+		}
+		if ws, err = resolveDir(o.Workspace); err != nil {
+			return err
+		}
+	} else if root, err = resolveDir(o.Dir); err != nil {
+		return err
 	}
 	token, err := server.NewSessionToken()
 	if err != nil {
@@ -130,7 +171,11 @@ func Serve(ctx context.Context, o Options, onReady func(Links)) error {
 	if err != nil {
 		return err
 	}
-	p := &project{root: root, store: o.Store, fixedDirs: o.ModelDirs, exe: exe, token: token, code: code[:32], codeBy: time.Now().Add(codeLifetime)}
+	p := &project{root: root, shared: &shared{
+		store: o.Store, fixedDirs: o.ModelDirs, exe: exe, token: token, ws: ws, projects: map[string]*project{},
+		code: code[:32], codeBy: time.Now().Add(codeLifetime),
+	}}
+	p.live.start(time.Now())
 
 	ln, err := net.Listen("tcp", o.Addr)
 	if err != nil {
@@ -140,12 +185,29 @@ func Serve(ctx context.Context, o Options, onReady func(Links)) error {
 		Handler:           server.ProtectExcept(p.routes(), ln.Addr().String(), token, "/api/exchange"),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	serveCtx, stop := context.WithCancel(ctx)
+	defer stop()
 	go func() {
-		<-ctx.Done()
+		<-serveCtx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
+	if o.QuitWhenClosed {
+		go func() {
+			for t := time.NewTicker(2 * time.Second); ; {
+				select {
+				case <-serveCtx.Done():
+					return
+				case now := <-t.C:
+					if p.live.expired(now) && !p.busy.Load() {
+						stop()
+						return
+					}
+				}
+			}
+		}()
+	}
 	if onReady != nil {
 		// Fragments are never sent to a server. The token link is for the terminal;
 		// the code link is for programs that put it on a command line.
@@ -168,18 +230,24 @@ func (p *project) routes() http.Handler {
 		w.Header().Set("Content-Security-Policy", csp)
 		w.Write(page)
 	})
-	mux.HandleFunc("GET /api/project", p.getProject)
+	// Routes about the editor as a whole.
 	mux.HandleFunc("POST /api/parse", p.parse)
 	mux.HandleFunc("POST /api/render", p.render)
-	mux.HandleFunc("PUT /api/workflow", p.putWorkflow)
-	mux.HandleFunc("GET /api/unit", p.getUnit)
-	mux.HandleFunc("PUT /api/unit", p.putUnit)
-	mux.HandleFunc("PUT /api/layout", p.putLayout)
 	mux.HandleFunc("GET /api/models", p.models)
 	mux.HandleFunc("PUT /api/settings", p.putSettings)
 	mux.HandleFunc("POST /api/exchange", p.exchange)
-	mux.HandleFunc("POST /api/run", p.run)
 	mux.HandleFunc("POST /api/test-model", p.testModel)
+	mux.HandleFunc("GET /api/workspace", p.workspaceInfo)
+	mux.HandleFunc("POST /api/workspace/new", p.newProject)
+	mux.HandleFunc("GET /api/ping", p.ping)
+	mux.HandleFunc("POST /api/closing", p.closing)
+	// Routes about one project: in a workspace, the page says which with a header.
+	mux.HandleFunc("GET /api/project", p.scoped((*project).getProject))
+	mux.HandleFunc("PUT /api/workflow", p.scoped((*project).putWorkflow))
+	mux.HandleFunc("GET /api/unit", p.scoped((*project).getUnit))
+	mux.HandleFunc("PUT /api/unit", p.scoped((*project).putUnit))
+	mux.HandleFunc("PUT /api/layout", p.scoped((*project).putLayout))
+	mux.HandleFunc("POST /api/run", p.scoped((*project).run))
 	return mux
 }
 
@@ -209,12 +277,12 @@ func (p *project) exchange(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	p.mu.Lock()
+	p.codeMu.Lock()
 	valid := !p.codeUsed && time.Now().Before(p.codeBy) && subtle.ConstantTimeCompare([]byte(in.Code), []byte(p.code)) == 1
 	if valid {
 		p.codeUsed = true
 	}
-	p.mu.Unlock()
+	p.codeMu.Unlock()
 	if !valid {
 		fail(w, http.StatusForbidden, "this link was already used or has expired; use the link printed in the terminal")
 		return
@@ -670,8 +738,8 @@ func (p *project) putSettings(w http.ResponseWriter, r *http.Request) {
 		clean = append(clean, filepath.Clean(d))
 	}
 	out, _ := json.Marshal(settings{ModelDirs: clean})
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.settingsMu.Lock()
+	defer p.settingsMu.Unlock()
 	if err := writeAtomic(p.settingsPath(), out); err != nil {
 		fail(w, http.StatusInternalServerError, "could not save: %v", err)
 		return

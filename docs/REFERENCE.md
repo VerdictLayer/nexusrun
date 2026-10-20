@@ -341,6 +341,19 @@ Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
 | `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
 | `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
 | `--app` | `false` | Open in its own window using Chrome, Edge, Chromium or Brave |
+| `--workspace` | none | A folder of workflows, instead of one workflow |
+| `--quit-when-closed` | `false` | Stop shortly after the page is closed |
+| `--install-launcher` / `--remove-launcher` | `false` | Add or remove the application menu entry (Linux) and exit |
+| `--no-browser` | `false` | Print the link instead of opening anything |
+
+#### `nexus studio [dir]`
+Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
+| `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
+| `--app` | `false` | Open in its own window using Chrome, Edge, Chromium or Brave |
 | `--no-browser` | `false` | Print the link instead of opening anything |
 
 #### `nexus studio [dir]`

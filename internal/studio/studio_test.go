@@ -40,7 +40,7 @@ func newEnvExe(t *testing.T, exe string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &project{root: root, store: st, exe: exe, token: token, code: "0123456789abcdef0123456789abcdef", codeBy: time.Now().Add(time.Minute)}
+	p := &project{root: root, shared: &shared{store: st, exe: exe, token: token, code: "0123456789abcdef0123456789abcdef", codeBy: time.Now().Add(time.Minute), projects: map[string]*project{}}}
 	ts := httptest.NewUnstartedServer(nil)
 	ts.Config.Handler = server.ProtectExcept(p.routes(), ts.Listener.Addr().String(), token, "/api/exchange")
 	e := &env{t: t, root: root, srv: ts, p: p}

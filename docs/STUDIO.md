@@ -9,12 +9,37 @@ edits the same `nexus-compose.yaml` that `nexus compose validate` and
 ```bash
 nexus studio my-workflow          # opens your browser on the editor
 nexus studio my-workflow --app    # or in its own window, without browser toolbars
+nexus studio --workspace ~/NexusRun --app   # a list of workflows, and a button to start new ones
 ```
 
 The first time you open it, a short welcome explains the four steps. Tick
 **Don't show this again** (on by default) and it stays away; the **?** button
 brings it back. The sun and moon button switches between light and dark, and the
 choice is remembered.
+
+## Many workflows: the workspace
+
+With `--workspace <folder>` Studio opens on **Your workflows**: every subfolder of
+that folder as a card, and a box to name a new one. Creating one makes the folder
+and opens it; the **‹ Workflows** button in the toolbar switches between them, and
+reopening Studio returns to the one you had open. Each workflow keeps its own
+`nexus-compose.yaml`, `agents/` and layout inside its own folder.
+
+Only direct subfolders of the workspace are workflows. A name is letters, digits,
+dots, dashes and underscores, and a symbolic link is never treated as one.
+
+## Start it from your application menu (Linux)
+
+```bash
+nexus studio --install-launcher                       # workflows in ~/NexusRun
+nexus studio --install-launcher --workspace ~/flows   # or another folder
+nexus studio --remove-launcher
+```
+
+This adds **NexusRun Studio** to your application menu. It opens the workspace in
+its own window, and stops by itself shortly after you close that window. If the
+usual port is taken, it uses a free one. On macOS and Windows, run
+`nexus studio --app --workspace <folder>`.
 
 ## What you do
 
@@ -71,6 +96,8 @@ speed. The same list is available as `nexus models --json`.
 
 ## Files and what Studio will not do
 
+- In a workspace, a project is named by a header and looked up as a direct child
+  of the workspace folder; there is no way to name a path elsewhere.
 - Studio reads and writes only `nexus-compose.yaml`, `agents/<name>/nexus.yaml`
   and `.nexusrun/studio.json` (where nodes sit) inside the project folder. It
   refuses paths that go through a symbolic link.
@@ -89,7 +116,8 @@ speed. The same list is available as `nexus models --json`.
 The editor is a local web page, and web pages in your browser can reach loopback
 addresses, so it is protected like `nexus serve`:
 
-- It listens on a loopback address only, and refuses any other `--addr`.
+- It listens on a loopback address only, and refuses any other `--addr`. If you
+  do not pass `--addr` and port 7718 is busy, it takes a free port instead.
 - Every request needs an access token. The link printed in your terminal carries
   it. When Studio opens a browser or an app window for you, that program's command
   line (which other accounts on the machine can read) carries only a one-time
@@ -112,4 +140,8 @@ addresses, so it is protected like `nexus serve`:
 | `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
 | `--model-dir` | none | Also search this folder for `.gguf` models (repeatable; or set `NEXUSRUN_MODEL_DIRS`) |
 | `--app` | `false` | Open in its own window using Chrome, Edge, Chromium or Brave, if one is installed; otherwise your default browser |
+| `--workspace` | none | A folder of workflows, instead of one workflow |
+| `--quit-when-closed` | `false` | Stop shortly after the page is closed (for launchers with no terminal) |
+| `--install-launcher` | `false` | Add NexusRun Studio to the application menu (Linux) and exit |
+| `--remove-launcher` | `false` | Remove that menu entry and exit |
 | `--no-browser` | `false` | Print the link instead of opening anything |

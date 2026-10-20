@@ -179,6 +179,21 @@ try {
 
   #ghost { position: fixed; z-index: 30; pointer-events: none; padding: 7px 13px; border-radius: 980px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; box-shadow: var(--shadow); }
 
+  /* workflows home */
+  #home { position: fixed; inset: 52px 0 0 0; background: var(--bg); z-index: 6; overflow-y: auto; padding: 56px 24px 40px; }
+  #home .wrap { max-width: 780px; margin: 0 auto; }
+  #home h1 { font-size: 30px; letter-spacing: -.025em; margin: 0 0 4px; }
+  #home .lead { color: var(--muted); margin: 0 0 26px; }
+  #homeGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 26px; }
+  .pcard { background: var(--surface); border-radius: 16px; padding: 16px 18px; border: 1px solid var(--line); box-shadow: var(--shadow); cursor: pointer; text-align: left; transition: border-color .15s, transform .08s; }
+  .pcard:hover { border-color: var(--accent); }
+  .pcard:active { transform: scale(.99); }
+  .pcard b { display: block; font-size: 15px; word-break: break-word; }
+  .pcard span { color: var(--muted); font-size: 12px; }
+  #newForm { display: flex; gap: 10px; max-width: 520px; }
+  #newForm input { flex: 1; }
+  #homeClose { position: absolute; right: 18px; top: 14px; }
+
   /* welcome */
   #welcome { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.38); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 20px; }
   #welcome .sheet { width: min(560px, 100%); max-height: 100%; overflow-y: auto; background: var(--surface); border-radius: 24px; box-shadow: var(--shadow-lg); padding: 34px 34px 26px; }
@@ -197,6 +212,7 @@ try {
 <div id="app">
   <header id="top">
     <span class="brand">NexusRun Studio</span>
+    <button class="btn quiet" id="homeBtn" type="button" hidden>‹ Workflows</button>
     <span class="crumb" id="crumb"></span>
     <button class="chip" id="health" type="button">…</button>
     <span class="grow"></span>
@@ -257,6 +273,19 @@ try {
 
   <aside id="inspector"></aside>
 </div>
+<section id="home" hidden>
+  <button class="icon" id="homeClose" type="button" aria-label="Back to the workflow" hidden><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div class="wrap">
+    <h1>Your workflows</h1>
+    <p class="lead" id="homeLead"></p>
+    <div id="homeGrid"></div>
+    <form id="newForm">
+      <input type="text" id="newName" placeholder="Name a new workflow, for example support-triage" spellcheck="false" autocomplete="off">
+      <button class="btn primary" type="submit">Create</button>
+    </form>
+    <p class="hint" id="homeErr"></p>
+  </div>
+</section>
 <div id="ghost" hidden></div>
 
 <div id="welcome" hidden role="dialog" aria-modal="true" aria-labelledby="wTitle">
@@ -312,7 +341,7 @@ const pref = {
 async function api(method, path, body) {
   const r = await fetch(path, {
     method,
-    headers: Object.assign({ Authorization: "Bearer " + token }, body !== undefined ? { "Content-Type": "application/json" } : {}),
+    headers: Object.assign({ Authorization: "Bearer " + token }, S.projectName ? { "X-Studio-Project": S.projectName } : {}, body !== undefined ? { "Content-Type": "application/json" } : {}),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   let data = {};
@@ -369,7 +398,7 @@ const W = 236, H = 108;
 const S = {
   spec: null, layout: {}, models: [], hw: null, dirs: [], fixedDirs: [], sel: null,
   diags: [], units: {}, view: { x: 40, y: 40, k: 1 }, yaml: "", broken: false, project: null,
-  tests: {}, busy: false, run: null, problemsOpen: false,
+  tests: {}, busy: false, run: null, problemsOpen: false, workspace: null, projectName: "",
 };
 
 function ownDir(agent) {
@@ -866,7 +895,7 @@ async function runWorkflow() {
   decorate(); renderTrace();
   clearInterval(runTick); runTick = setInterval(() => { if (S.run?.running) $("runStatus").textContent = "Running · " + secs(Date.now() - S.run.start); }, 500);
   try {
-    const r = await fetch("/api/run", { method: "POST", signal: ctl.signal, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ input: $("runText").value }) });
+    const r = await fetch("/api/run", { method: "POST", signal: ctl.signal, headers: { Authorization: "Bearer " + token, "X-Studio-Project": S.projectName || "", "Content-Type": "application/json" }, body: JSON.stringify({ input: $("runText").value }) });
     if (!r.ok) { let d = {}; try { d = await r.json(); } catch { /* no body */ } throw new Error(d.error || "HTTP " + r.status); }
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "";
@@ -1021,9 +1050,14 @@ function newSpec(name) {
   return { apiVersion: "nexusrun.dev/v1", kind: "Workflow", name: (name || "workflow").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "workflow", version: "0.1.0", agents: {}, routing: [] };
 }
 
-async function start() {
-  await redeemCode();
-  if (!token) { $("health").textContent = "No access token"; $("health").className = "chip bad"; $("inspector").textContent = redeemError || "Open the link that `nexus studio` printed; it carries the access token."; return; }
+function resetProject() {
+  S.spec = null; S.layout = {}; S.units = {}; S.sel = null; S.diags = []; S.run = null; S.broken = false; S.yaml = "";
+  S.view = { x: 40, y: 40, k: 1 }; S.problemsOpen = false;
+  $("run").hidden = true; $("yaml").hidden = true; $("banner")?.remove();
+}
+
+async function loadProject() {
+  resetProject();
   let p;
   try { p = await api("GET", "/api/project"); } catch (e) { $("health").textContent = "Offline"; $("health").className = "chip bad"; $("inspector").textContent = e.message; return; }
   S.project = p; S.layout = p.layout || {}; S.dirs = p.model_dirs || []; S.fixedDirs = p.fixed_dirs || [];
@@ -1041,8 +1075,68 @@ async function start() {
   for (const n of Object.keys(S.spec.agents)) { const d = ownDir(n); if (d) await loadUnit(d); }
   autoPlace(); draw(); renderProblems(); renderYaml(); inspect();
   if (Object.keys(S.spec.agents).length) fitView();
-  if (pref.get("welcome") !== "hidden") openWelcome();
+  renderModels();
+}
+
+const ago = (iso) => {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!isFinite(m) || m < 1) return "just now";
+  if (m < 60) return m + " min ago";
+  if (m < 1440) return Math.round(m / 60) + " h ago";
+  return Math.round(m / 1440) + " d ago";
+};
+async function showHome(canClose) {
+  $("homeErr").textContent = "";
+  try { S.workspace = await api("GET", "/api/workspace"); } catch (e) { $("homeErr").textContent = e.message; }
+  const ws = S.workspace;
+  $("homeLead").textContent = ws?.root ? "Saved in " + ws.root : "";
+  $("homeClose").hidden = !canClose;
+  const grid = $("homeGrid");
+  grid.replaceChildren();
+  for (const p of ws?.projects || []) {
+    grid.append(h("button", { class: "pcard", type: "button", onclick: () => openProject(p.name) }, h("b", {}, p.name), h("span", {}, p.has_workflow ? "Changed " + ago(p.modified) : "Empty")));
+  }
+  if (!(ws?.projects || []).length) grid.append(h("p", { class: "muted" }, "Nothing here yet. Name your first workflow below."));
+  $("home").hidden = false;
+  $("newName").focus();
+}
+async function openProject(name) {
+  S.projectName = name; pref.set("project", name);
+  $("home").hidden = true;
+  await loadProject();
+}
+$("homeBtn").addEventListener("click", () => showHome(true));
+$("homeClose").addEventListener("click", () => ($("home").hidden = true));
+$("newForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("newName").value.trim();
+  if (!name) return;
+  try { await api("POST", "/api/workspace/new", { name }); $("newName").value = ""; await openProject(name); }
+  catch (err) { $("homeErr").textContent = err.message; }
+});
+
+// While the page is open it says so, so a window with no terminal behind it can
+// stop the editor when it is closed.
+function startHeartbeat() {
+  const ping = () => fetch("/api/ping", { headers: { Authorization: "Bearer " + token } }).catch(() => {});
+  ping(); setInterval(ping, 5000);
+  window.addEventListener("pagehide", () => fetch("/api/closing", { method: "POST", keepalive: true, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: "{}" }).catch(() => {}));
+}
+
+async function start() {
+  await redeemCode();
+  if (!token) { $("health").textContent = "No access token"; $("health").className = "chip bad"; $("inspector").textContent = redeemError || "Open the link that `nexus studio` printed; it carries the access token."; return; }
+  let ws;
+  try { ws = await api("GET", "/api/workspace"); } catch (e) { $("health").textContent = "Offline"; $("health").className = "chip bad"; $("inspector").textContent = e.message; return; }
+  startHeartbeat();
   await refreshModels();
+  if (ws.workspace) {
+    S.workspace = ws; $("homeBtn").hidden = false;
+    const last = pref.get("project");
+    if (last && ws.projects.some((p) => p.name === last)) await openProject(last);
+    else await showHome(false);
+  } else await loadProject();
+  if (pref.get("welcome") !== "hidden") openWelcome();
 }
 start();
 </script>

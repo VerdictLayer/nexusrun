@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,9 +17,9 @@ import (
 )
 
 func newStudioCmd() *cobra.Command {
-	var addr string
+	var addr, workspace string
 	var modelDirs []string
-	var noBrowser, app bool
+	var noBrowser, app, quitWhenClosed, installLauncher, removeLauncher bool
 	cmd := &cobra.Command{
 		Use:   "studio [dir]",
 		Short: "Build a workflow on a canvas",
@@ -32,15 +33,37 @@ The editor is a local web page. It listens on a loopback address only, needs an
 access token, and can only read and write a few files inside the project folder.
 
 With --app it opens in its own window, without browser toolbars, using Chrome,
-Edge, Chromium or Brave when one is installed.`,
+Edge, Chromium or Brave when one is installed.
+
+With --workspace the editor opens on a folder of workflows instead of one
+workflow: it lists them, and creates new ones inside it. --install-launcher adds
+NexusRun Studio to your application menu (Linux), opening that workspace in its
+own window and stopping when the window is closed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if installLauncher || removeLauncher {
+				return launcherCommand(workspace, removeLauncher)
+			}
 			dir := "."
 			if len(args) == 1 {
+				if workspace != "" {
+					return fmt.Errorf("give a folder or --workspace, not both")
+				}
 				dir = args[0]
 			}
-			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			if workspace != "" {
+				dir = ""
+			} else if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 				return fmt.Errorf("%s is not a folder", dir)
+			}
+			// The usual port is a convenience, so a second editor takes any free
+			// one. An address the user chose is respected and fails if taken.
+			if !cmd.Flags().Changed("addr") {
+				if ln, err := net.Listen("tcp", addr); err != nil {
+					addr = "127.0.0.1:0"
+				} else {
+					ln.Close()
+				}
 			}
 			s, err := store.Open()
 			if err != nil {
@@ -51,7 +74,7 @@ Edge, Chromium or Brave when one is installed.`,
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return studio.Serve(ctx, studio.Options{Dir: dir, Addr: addr, Store: s, ModelDirs: modelDirs}, func(l studio.Links) {
+			return studio.Serve(ctx, studio.Options{Dir: dir, Workspace: workspace, Addr: addr, Store: s, ModelDirs: modelDirs, QuitWhenClosed: quitWhenClosed}, func(l studio.Links) {
 				fmt.Printf("NexusRun Studio → %s\nPress Ctrl+C to stop.\n", l.Token)
 				if noBrowser {
 					return
@@ -77,6 +100,10 @@ Edge, Chromium or Brave when one is installed.`,
 	cmd.Flags().StringArrayVar(&modelDirs, "model-dir", nil, "also search this folder for .gguf models (repeatable)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "print the link instead of opening anything")
 	cmd.Flags().BoolVar(&app, "app", false, "open in its own window instead of a browser tab")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "open a folder of workflows instead of a single workflow")
+	cmd.Flags().BoolVar(&quitWhenClosed, "quit-when-closed", false, "stop when the page is closed (for launchers that have no terminal)")
+	cmd.Flags().BoolVar(&installLauncher, "install-launcher", false, "add NexusRun Studio to the application menu (Linux) and exit")
+	cmd.Flags().BoolVar(&removeLauncher, "remove-launcher", false, "remove the application menu entry and exit")
 	return cmd
 }
 
