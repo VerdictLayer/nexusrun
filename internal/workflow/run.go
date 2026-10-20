@@ -61,6 +61,10 @@ type RunOptions struct {
 	Only []string
 
 	Progress func(format string, args ...any)
+
+	// Events, when set, is called for each step of the run, in order, from the
+	// goroutine that runs the workflow.
+	Events func(Event)
 }
 
 // AgentRun is one agent's outcome within a workflow run.
@@ -101,7 +105,7 @@ type Result struct {
 // on a 4 GB Pi and one that is killed by the OOM reaper, and inference is
 // already saturating the accelerator, so concurrency buys throughput only
 // on hardware that is not the point of this project.
-func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
+func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (res *Result, err error) {
 	if opts.Spec == nil {
 		return nil, fmt.Errorf("no workflow given")
 	}
@@ -110,8 +114,14 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 		logf = func(string, ...any) {}
 	}
 	spec := opts.Spec
+	emit := func(e Event) {
+		if opts.Events != nil {
+			opts.Events(e)
+		}
+	}
 
-	order, err := spec.Order()
+	var order []string
+	order, err = spec.Order()
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +140,15 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 	}
 
 	start := time.Now()
-	res := &Result{Workflow: spec.Ref(), Outputs: map[string]string{}}
+	res = &Result{Workflow: spec.Ref(), Outputs: map[string]string{}}
+	emit(Event{Kind: "start", Order: order})
+	defer func() {
+		done := Event{Kind: "done", OK: flag(err == nil), TookMS: time.Since(start).Milliseconds()}
+		if err != nil {
+			done.Error = err.Error()
+		}
+		emit(done)
+	}()
 
 	// env is the value namespace conditions and transforms read. It grows
 	// as agents finish, which is why conditions can only ever reference
@@ -146,6 +164,13 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 		run := AgentRun{Name: name, Unit: agent.Unit}
 
 		prompt, delivered, skipReason, err := spec.gather(name, opts.Input, env)
+		for _, r := range spec.Inbound(name) {
+			fired := false
+			for _, m := range delivered {
+				fired = fired || m.From == r.From
+			}
+			emit(Event{Kind: "route", From: r.From, To: r.To, Fired: flag(fired)})
+		}
 		if err != nil {
 			run.Error = err.Error()
 			res.Agents = append(res.Agents, run)
@@ -155,6 +180,7 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 		if skipReason != "" {
 			run.Skipped, run.Reason = true, skipReason
 			logf("skip %s — %s", name, skipReason)
+			emit(Event{Kind: "agent_skipped", Agent: name, Reason: skipReason})
 			res.Agents = append(res.Agents, run)
 			continue
 		}
@@ -173,6 +199,7 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 		run.Prompt = prompt
 
 		logf("▶ %s (%s)", name, agent.Unit)
+		emit(Event{Kind: "agent_start", Agent: name, Unit: agent.Unit, Prompt: prompt})
 		out, attempts, took, err := attempt(ctx, exec, AgentRequest{
 			Name:          name,
 			Unit:          agent.Unit,
@@ -190,9 +217,11 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 			run.Error = err.Error()
 			res.Agents = append(res.Agents, run)
 			res.Took = time.Since(start)
+			emit(Event{Kind: "agent_failed", Agent: name, Error: err.Error(), Attempts: attempts, TookMS: took.Milliseconds()})
 			return res, fmt.Errorf("agent %q failed after %d attempt(s): %w", name, attempts, err)
 		}
 		if strings.TrimSpace(out.Output) == "" {
+			emit(Event{Kind: "agent_failed", Agent: name, Error: "produced no output", Attempts: attempts, TookMS: took.Milliseconds()})
 			run.Error = "produced no output"
 			res.Agents = append(res.Agents, run)
 			res.Took = time.Since(start)
@@ -213,6 +242,8 @@ func Run(ctx context.Context, exec ExecFunc, opts RunOptions) (*Result, error) {
 			FieldBackend:   out.Backend,
 			FieldOK:        true,
 		}
+		emit(Event{Kind: "agent_done", Agent: name, Output: out.Output, Tokens: out.TokensOut, TokPerSec: out.TokPerSec,
+			Backend: out.Backend, Device: out.Device, Attempts: attempts, TookMS: took.Milliseconds()})
 		logf("  %d chars · %d tokens · %.1f tok/s · %s", len(out.Output), out.TokensOut, out.TokPerSec, took.Round(time.Millisecond))
 	}
 

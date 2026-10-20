@@ -321,6 +321,7 @@ wf:0.1.0 is a workflow, not a unit — run it with `nexus compose up -f wf:0.1.0
 | `nexus compose <unit> <unit>…` | Sequential pipeline, no file needed |
 | `nexus compose init [dir]` | Scaffold a `nexus-compose.yaml` |
 | `nexus compose validate [file]` | Check without running; `--json` lists each problem with its path in the file |
+| `nexus compose up --events` | Run, and stream each step (agents starting and finishing, links firing) as one JSON object per line |
 | `nexus compose up` | Run |
 | `nexus compose down [name]` | Stop a detached run |
 | `nexus compose ls` | List detached runs |

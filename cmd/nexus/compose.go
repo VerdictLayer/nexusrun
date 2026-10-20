@@ -245,7 +245,7 @@ func validateWorkflowJSON(path string) error {
 func newComposeUpCmd() *cobra.Command {
 	var file, input, inputFile string
 	var maxTokens int
-	var detach, jsonOut, showStages bool
+	var detach, jsonOut, showStages, events bool
 	var only []string
 
 	cmd := &cobra.Command{
@@ -286,14 +286,24 @@ between a workflow that runs and one the OOM killer stops.`,
 			ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
-			res, runErr := workflow.Run(ctx, workflowExec(s), workflow.RunOptions{
+			opts := workflow.RunOptions{
 				Spec:             spec,
 				Input:            input,
 				BaseDir:          baseDir,
 				DefaultMaxTokens: maxTokens,
 				Only:             only,
 				Progress:         logf,
-			})
+			}
+			if events {
+				// One JSON object per line on stdout, flushed as each step happens.
+				// Everything else (progress, errors) stays on stderr.
+				enc := json.NewEncoder(os.Stdout)
+				opts.Events = func(e workflow.Event) { _ = enc.Encode(e) }
+			}
+			res, runErr := workflow.Run(ctx, workflowExec(s), opts)
+			if events {
+				return runErr
+			}
 
 			if jsonOut && res != nil {
 				enc := json.NewEncoder(os.Stdout)
@@ -330,6 +340,7 @@ between a workflow that runs and one the OOM killer stops.`,
 	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "run in the background")
 	cmd.Flags().BoolVar(&showStages, "stages", false, "print every agent's output")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	cmd.Flags().BoolVar(&events, "events", false, "stream each step as one JSON object per line instead of printing the result")
 	cmd.Flags().StringArrayVar(&only, "only", nil, "run just these agents and their dependencies (repeatable)")
 	return cmd
 }
