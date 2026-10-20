@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -2003,7 +2007,6 @@ the CLI just falls back to loading per run.`,
 					pool = nil
 				}
 			}
-			fmt.Printf("NexusRun console → http://%s\n", addr)
 			return server.Serve(ctx, s, addr, pool)
 		},
 	}
@@ -2028,12 +2031,26 @@ func tryDaemon(ctx context.Context, req daemon.RunRequest) *daemon.RunResponse {
 	if err != nil {
 		return nil
 	}
+	// The daemon's API token lives in this user's NexusRun home. No token means
+	// no daemon of ours is running, so fall back to direct execution.
+	st, err := store.Open()
+	if err != nil {
+		return nil
+	}
+	token, err := server.ReadToken(st.Root)
+	if err != nil {
+		return nil
+	}
+	if !verifyDaemon(ctx, daemonAddr(), token) {
+		return nil
+	}
 	url := "http://" + daemonAddr() + "/api/run"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+token)
 
 	// A short dial timeout keeps the "no daemon" path fast, while the
 	// overall request may take as long as generation needs.
@@ -2056,6 +2073,34 @@ func tryDaemon(ctx context.Context, req daemon.RunRequest) *daemon.RunResponse {
 		return nil
 	}
 	return &out
+}
+
+// verifyDaemon proves that whatever is listening on addr holds this user's
+// token, before the token or a prompt is sent to it. Another local account can
+// bind the port first, but it cannot read the token file, so it cannot answer.
+func verifyDaemon(ctx context.Context, addr, token string) bool {
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return false
+	}
+	n := hex.EncodeToString(nonce)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/api/handshake?nonce="+n, nil)
+	if err != nil {
+		return false
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 300 * time.Millisecond}).DialContext}}
+	resp, err := client.Do(r)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	got, err := io.ReadAll(io.LimitReader(resp.Body, 128))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return false
+	}
+	return hmac.Equal(got, []byte(server.Proof(token, n)))
 }
 
 // --- shared helpers -------------------------------------------------------

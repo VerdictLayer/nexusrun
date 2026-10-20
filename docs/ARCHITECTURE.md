@@ -124,8 +124,12 @@ before it could exec anything.
 
 `nexus serve` exposes inspection — units, hardware, run history — plus exactly
 one mutating endpoint, `POST /api/run`, which the CLI uses to reach warm models.
-It binds to loopback by default. Do not expose it publicly without putting
-authentication in front of it: it executes units by design.
+It binds to loopback only, and every `/api/` call needs a bearer token that
+`nexus serve` writes to `daemon.token` (mode 0600) in the NexusRun home on each
+start. Other local accounts cannot read it, so they cannot use the daemon. Before
+sending a prompt, `nexus run` asks the listener to prove it holds the token
+(an HMAC of a fresh nonce), so a process that bound the port first learns
+nothing and the run falls back to direct execution.
 
 ## Execution flow
 

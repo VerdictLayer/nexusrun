@@ -59,8 +59,14 @@ Example:
 			if link == "" {
 				link = da.VerificationURI
 			}
+			// The link comes from the registry and is printed and handed to the
+			// system opener, so it must be a plain web link and nothing else.
+			if !safeLoginLink(link) || !safeLoginLink(da.VerificationURI) {
+				return errors.New("the registry returned an unsafe sign-in link; refusing to continue")
+			}
 			fmt.Printf("\nTo sign in, open this link in a browser:\n\n  %s\n\n", link)
-			fmt.Printf("or go to %s and enter the code:  %s\n\n", da.VerificationURI, da.UserCode)
+			fmt.Printf("and type this code when asked:  %s\n", da.UserCode)
+			fmt.Printf("Only approve it if you started this sign-in yourself.\n\n")
 			if !noBrowser && canOpenBrowser() {
 				if openBrowser(link) == nil {
 					fmt.Println("(opened your browser)")
@@ -154,6 +160,28 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// safeLoginLink accepts only https links, or http to a loopback registry, with
+// no embedded credentials or control characters.
+func safeLoginLink(link string) bool {
+	u, err := url.Parse(link)
+	if err != nil || u.Host == "" || u.User != nil {
+		return false
+	}
+	for _, r := range link {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		h := u.Hostname()
+		return h == "localhost" || h == "127.0.0.1" || h == "::1"
+	}
+	return false
 }
 
 // baseURL is https except for loopback registries, where plain HTTP is normal.

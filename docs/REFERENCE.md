@@ -302,7 +302,7 @@ Start the web console and warm-model daemon.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--addr` | `127.0.0.1:7717` | Listen address |
+| `--addr` | `127.0.0.1:7717` | Listen address (loopback only) |
 | `--idle-timeout` | `10m` | Release a model after this long unused |
 | `--no-warm` | `false` | Console only; do not keep models resident |
 
@@ -313,8 +313,12 @@ Start the web console and warm-model daemon.
 Served by `nexus serve`. Installation is previewed with GET and applied only by
 an explicit loopback POST.
 
-The server listens on `127.0.0.1:7717` by default and protects itself from web
-pages open in your browser, which can otherwise reach loopback services:
+The server listens on `127.0.0.1:7717` by default. Every `/api/` request needs
+`Authorization: Bearer <token>`. The token is created each time `nexus serve`
+starts, stored in `daemon.token` (mode 0600) in the NexusRun home, and printed
+once in the console link (`http://127.0.0.1:7717/#token=…`), which the browser
+keeps for that tab only. It also protects itself from web pages open in your
+browser, which can otherwise reach loopback services:
 
 - The `Host` header must name the server's own loopback address and port, so a
   site that re-points its DNS name at `127.0.0.1` is refused.

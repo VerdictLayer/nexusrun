@@ -109,6 +109,21 @@
 </main>
 
 <script>
+// API calls carry the token from the link `nexus serve` printed. It arrives in the
+// URL fragment, is kept for this tab only, and is removed from the address bar.
+const token = (() => {
+  const m = /[#&]token=([0-9a-f]+)/.exec(location.hash);
+  try {
+    if (m) { sessionStorage.setItem("nexus-token", m[1]); history.replaceState(null, "", location.pathname + location.search); }
+    return sessionStorage.getItem("nexus-token") || "";
+  } catch { return m ? m[1] : ""; }
+})();
+const apiFetch = async (url, opts = {}) => {
+  const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + token } });
+  if (r.status === 401) throw new Error("open the link that `nexus serve` printed; it carries the access token");
+  return r;
+};
+
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -121,9 +136,9 @@ const size = n => {
 
 async function load() {
   const [hw, units, runs] = await Promise.all([
-    fetch("/api/hardware").then(r => r.json()),
-    fetch("/api/units").then(r => r.json()),
-    fetch("/api/runs").then(r => r.json()),
+    apiFetch("/api/hardware").then(r => r.json()),
+    apiFetch("/api/units").then(r => r.json()),
+    apiFetch("/api/runs").then(r => r.json()),
   ]);
 
   const h = hw.hardware;
@@ -197,7 +212,7 @@ let installPlan = null;
 async function showInstall(ref) {
   const box = document.getElementById("install");
   box.innerHTML = '<div class="empty">Checking models, runtime, hardware, tools, and secrets…</div>';
-  const res = await fetch("/api/install?unit=" + encodeURIComponent(ref));
+  const res = await apiFetch("/api/install?unit=" + encodeURIComponent(ref));
   const plan = await res.json();
   if (!res.ok) throw new Error(plan.error || "installation check failed");
   installPlan = plan; renderInstall(plan);
@@ -237,7 +252,7 @@ async function applyInstall() {
   const button = document.getElementById("apply-install"); button.disabled = true; button.textContent = "Installing…";
   const actions = new Set(installPlan.checks.filter(c => c.status === "action_required").map(c => c.action));
   const secrets = {}; document.querySelectorAll("[data-secret]").forEach(x => { if (x.value) secrets[x.dataset.secret] = x.value; });
-  const res = await fetch("/api/install", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({unit:installPlan.unit, models:actions.has("download_model"), runtime:actions.has("install_runtime"), tools:actions.has("install_tools"), secrets, run_tests:true})});
+  const res = await apiFetch("/api/install", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({unit:installPlan.unit, models:actions.has("download_model"), runtime:actions.has("install_runtime"), tools:actions.has("install_tools"), secrets, run_tests:true})});
   const plan = await res.json(); if (!res.ok) { button.disabled=false; button.textContent="Retry"; throw new Error(plan.error || "installation failed"); }
   installPlan = plan; renderInstall(plan);
 }

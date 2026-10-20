@@ -208,6 +208,18 @@ func Serve(ctx context.Context, s *store.Store, addr string, pool *daemon.Pool) 
 		w.Write(data)
 	})
 
+	// The guard, /api/run and the install endpoints all
+	// assume a loopback listener. Binding anything else would put them on
+	// the network behind a single shared token, so refuse rather than warn.
+	if host, _, serr := net.SplitHostPort(addr); serr != nil || !isLoopbackHost(host) {
+		return fmt.Errorf("refusing to listen on %q: the console is for this machine only and binds to a loopback address (for example 127.0.0.1:7717)", addr)
+	}
+
+	token, err := newToken(s.Root)
+	if err != nil {
+		return fmt.Errorf("create API token: %w", err)
+	}
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
@@ -215,9 +227,13 @@ func Serve(ctx context.Context, s *store.Store, addr string, pool *daemon.Pool) 
 	srv := &http.Server{
 		Addr: addr,
 		// The guard sees the real bound address, which matters when addr asks for port 0.
-		Handler:           guard(mux, ln.Addr().String()),
+		Handler:           guard(requireToken(mux, token), ln.Addr().String()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	// The token rides in the URL fragment, which browsers never send to a server
+	// or put in a Referer; the console moves it into session storage on load.
+	fmt.Printf("NexusRun console → http://%s/#token=%s\n", ln.Addr(), token)
 
 	go func() {
 		<-ctx.Done()

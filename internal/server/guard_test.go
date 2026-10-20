@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -131,6 +132,14 @@ func TestResponseHeaders(t *testing.T) {
 	} {
 		if got := h.Get(k); got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestServeRefusesNonLoopbackBind(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:0", ":0", "192.168.1.5:7717", "[::]:0", "example.com:80", "7717"} {
+		if err := Serve(context.Background(), nil, addr, nil); err == nil || !strings.Contains(err.Error(), "loopback") {
+			t.Errorf("Serve(%q) = %v, want a loopback refusal", addr, err)
 		}
 	}
 }

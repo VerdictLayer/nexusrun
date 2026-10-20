@@ -324,7 +324,7 @@ nexus build my-agent --seal -o my-agent.nx
 nexus import my-agent.nx
 
 # Keep models warm + watch it in a browser
-nexus serve     # → http://127.0.0.1:7717
+nexus serve     # prints the console link, http://127.0.0.1:7717/#token=…
                 # while running, `nexus run` skips model load entirely
 
 # Chain units together
