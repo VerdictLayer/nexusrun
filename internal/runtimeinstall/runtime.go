@@ -17,9 +17,26 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/verdictlayer/nexusrun/internal/store"
 )
+
+const (
+	// Limits on what an archive may expand to, so a corrupt or hostile one
+	// cannot fill the disk even though its hash has been checked.
+	maxArchiveBytes   = 4 << 30
+	maxExtractedBytes = 8 << 30
+	maxArchiveEntries = 20000
+)
+
+// downloadClient has no overall timeout (the archive is large) but gives up on
+// a server that stops sending.
+var downloadClient = &http.Client{Transport: &http.Transport{
+	Proxy:                 http.ProxyFromEnvironment,
+	TLSHandshakeTimeout:   15 * time.Second,
+	ResponseHeaderTimeout: 30 * time.Second,
+}}
 
 type Release struct {
 	Name      string   `json:"name"`
@@ -96,11 +113,14 @@ func CurrentPath(root string) string {
 // Install downloads, verifies and extracts a release. progress receives
 // bytes downloaded and the advertised total.
 func Install(ctx context.Context, s *store.Store, r Release, progress store.Progress) error {
+	if strings.TrimPrefix(r.SHA256, "sha256:") == "" {
+		return fmt.Errorf("refusing to install %s %s: the release has no pinned SHA-256", r.Name, r.Version)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -108,6 +128,7 @@ func Install(ctx context.Context, s *store.Store, r Release, progress store.Prog
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s %s: %s", r.Name, r.Version, resp.Status)
 	}
+	body := io.LimitReader(resp.Body, maxArchiveBytes+1)
 	tmp, err := os.CreateTemp("", "nexus-runtime-*.tar.gz")
 	if err != nil {
 		return err
@@ -117,7 +138,7 @@ func Install(ctx context.Context, s *store.Store, r Release, progress store.Prog
 	buf := make([]byte, 1<<20)
 	var done int64
 	for {
-		n, rerr := resp.Body.Read(buf)
+		n, rerr := body.Read(buf)
 		if n > 0 {
 			if _, err := tmp.Write(buf[:n]); err != nil {
 				tmp.Close()
@@ -140,8 +161,11 @@ func Install(ctx context.Context, s *store.Store, r Release, progress store.Prog
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if done > maxArchiveBytes {
+		return fmt.Errorf("download %s %s: larger than the %d byte limit", r.Name, r.Version, maxArchiveBytes)
+	}
 	got := hex.EncodeToString(h.Sum(nil))
-	if r.SHA256 != "" && got != strings.TrimPrefix(r.SHA256, "sha256:") {
+	if got != strings.TrimPrefix(r.SHA256, "sha256:") {
 		return fmt.Errorf("runtime integrity check failed: expected %s, got %s", r.SHA256, got)
 	}
 	dest := filepath.Join(s.Root, "runtimes", r.Name, r.Version)
@@ -177,13 +201,17 @@ func extractTGZ(path, dest string) error {
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
-	for {
+	var written int64
+	for entries := 0; ; entries++ {
 		h, err := tr.Next()
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if entries >= maxArchiveEntries {
+			return fmt.Errorf("runtime archive has too many entries")
 		}
 		clean := filepath.Clean(filepath.FromSlash(h.Name))
 		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
@@ -204,8 +232,12 @@ func extractTGZ(path, dest string) error {
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(out, tr)
+			n, copyErr := io.Copy(out, io.LimitReader(tr, maxExtractedBytes-written+1))
+			written += n
 			closeErr := out.Close()
+			if copyErr == nil && written > maxExtractedBytes {
+				copyErr = fmt.Errorf("runtime archive expands beyond the %d byte limit", int64(maxExtractedBytes))
+			}
 			if copyErr != nil {
 				return copyErr
 			}
