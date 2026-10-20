@@ -48,6 +48,15 @@ func (s *Spec) Edges() map[string][]string {
 	return out
 }
 
+// CycleError is the error Order returns for a dependency cycle. Agents lists
+// every agent that is on, or downstream of, a cycle.
+type CycleError struct {
+	Agents []string
+	text   string
+}
+
+func (e *CycleError) Error() string { return e.text }
+
 // Order returns agents in a topological execution order, or an error
 // naming the cycle. Ties are broken alphabetically so the order a
 // workflow runs in is a property of the file, not of map iteration.
@@ -74,7 +83,12 @@ func (s *Spec) Order() ([]string, error) {
 			}
 		}
 		if len(ready) == 0 {
-			return nil, fmt.Errorf("dependency cycle among agents: %s", describeCycle(deps, remaining))
+			members := make([]string, 0, len(remaining))
+			for n := range remaining {
+				members = append(members, n)
+			}
+			sort.Strings(members)
+			return nil, &CycleError{Agents: members, text: fmt.Sprintf("dependency cycle among agents: %s", describeCycle(deps, remaining))}
 		}
 		sort.Strings(ready)
 		for _, n := range ready {

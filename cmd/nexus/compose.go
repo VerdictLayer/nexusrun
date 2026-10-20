@@ -134,6 +134,7 @@ func loadWorkflow(ctx context.Context, s *store.Store, ref string) (*workflow.Sp
 
 func newComposeValidateCmd() *cobra.Command {
 	var file string
+	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "validate [file]",
 		Short: "Check a workflow without running it",
@@ -146,6 +147,9 @@ field an agent does not have, and transforms that will not render.`,
 			path := file
 			if len(args) == 1 {
 				path = args[0]
+			}
+			if jsonOut {
+				return validateWorkflowJSON(path)
 			}
 			s, err := store.Open()
 			if err != nil {
@@ -193,7 +197,47 @@ field an agent does not have, and transforms that will not render.`,
 		},
 	}
 	composeFileFlag(cmd, &file)
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit the result as JSON, with each problem located in the file")
 	return cmd
+}
+
+// workflowReport is the machine-readable result of validating a workflow file.
+type workflowReport struct {
+	Valid       bool                  `json:"valid"`
+	File        string                `json:"file"`
+	Workflow    string                `json:"workflow,omitempty"`
+	Order       []string              `json:"order,omitempty"`
+	Diagnostics []workflow.Diagnostic `json:"diagnostics"`
+}
+
+// validateWorkflowJSON prints the report for a file or directory and fails when
+// the workflow is invalid, so a caller can use either the JSON or the exit status.
+func validateWorkflowJSON(path string) error {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		path = filepath.Join(path, workflow.FileName)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	spec, ds := workflow.Diagnose(data)
+	rep := workflowReport{Valid: len(ds) == 0, File: path, Diagnostics: ds}
+	if rep.Diagnostics == nil {
+		rep.Diagnostics = []workflow.Diagnostic{}
+	}
+	if spec != nil && rep.Valid {
+		rep.Workflow = spec.Ref()
+		rep.Order, _ = spec.Order()
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(rep); err != nil {
+		return err
+	}
+	if !rep.Valid {
+		return fmt.Errorf("%s is not valid", path)
+	}
+	return nil
 }
 
 // --- up -------------------------------------------------------------------

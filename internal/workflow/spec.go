@@ -14,6 +14,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -186,103 +187,144 @@ func (s *Spec) AgentNames() []string {
 	return names
 }
 
+// Diagnostic is one validation problem, tied to the place in the file it
+// concerns so a tool can point at it. Message is the same text Validate prints.
+type Diagnostic struct {
+	// Path locates the problem in the file: "agents.writer.unit",
+	// "routing[1].condition", "shared_state.backend". Empty means the whole
+	// file.
+	Path    string `json:"path"`
+	Message string `json:"message"`
+	// Agents names the agents involved, when the problem is about specific
+	// ones (a dependency cycle, a route between two agents).
+	Agents []string `json:"agents,omitempty"`
+	// Line is the 1-based line, set only for YAML syntax problems, where no
+	// path exists yet.
+	Line int `json:"line,omitempty"`
+}
+
+type diagnostics []Diagnostic
+
+func (d *diagnostics) add(path string, agents []string, format string, args ...any) {
+	*d = append(*d, Diagnostic{Path: path, Agents: agents, Message: fmt.Sprintf(format, args...)})
+}
+
 // Validate checks everything checkable without executing anything.
 func (s *Spec) Validate() error {
-	var errs []string
+	ds := s.Diagnostics()
+	if len(ds) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(ds))
+	for i, d := range ds {
+		msgs[i] = d.Message
+	}
+	return fmt.Errorf("invalid %s:\n  - %s", FileName, strings.Join(msgs, "\n  - "))
+}
+
+// Diagnostics is Validate with each problem located. An empty result means the
+// workflow is valid.
+func (s *Spec) Diagnostics() []Diagnostic {
+	var ds diagnostics
 
 	if s.APIVersion != APIVersion {
-		errs = append(errs, fmt.Sprintf("apiVersion must be %q, got %q", APIVersion, s.APIVersion))
+		ds.add("apiVersion", nil, "apiVersion must be %q, got %q", APIVersion, s.APIVersion)
 	}
 	if s.Kind != Kind {
-		errs = append(errs, fmt.Sprintf("kind must be %q, got %q — a unit file is kind Unit and belongs in %s",
-			Kind, s.Kind, "nexus.yaml"))
+		ds.add("kind", nil, "kind must be %q, got %q — a unit file is kind Unit and belongs in %s",
+			Kind, s.Kind, "nexus.yaml")
 	}
 	if !nameRe.MatchString(s.Name) {
-		errs = append(errs, fmt.Sprintf("name %q must be lowercase alphanumeric with hyphens", s.Name))
+		ds.add("name", nil, "name %q must be lowercase alphanumeric with hyphens", s.Name)
 	}
 	if s.Version == "" {
-		errs = append(errs, "version is required")
+		ds.add("version", nil, "version is required")
 	}
 	if len(s.Agents) == 0 {
-		errs = append(errs, "at least one agent is required")
+		ds.add("agents", nil, "at least one agent is required")
 	}
 
 	for _, name := range s.AgentNames() {
 		a := s.Agents[name]
 		label := fmt.Sprintf("agents.%s", name)
+		who := []string{name}
 		if !agentNameRe.MatchString(name) {
-			errs = append(errs, fmt.Sprintf(
+			ds.add(label, who,
 				"%s: name must start with a letter or underscore and contain only letters, digits and underscores — it is also an identifier in conditions and transforms",
-				label))
+				label)
 		}
 		if strings.TrimSpace(a.Unit) == "" {
-			errs = append(errs, label+": unit is required")
+			ds.add(label+".unit", who, "%s: unit is required", label)
 		}
 		for _, p := range a.Hardware.Prefer {
 			if p != "npu" && p != "gpu" && p != "cpu" {
-				errs = append(errs, fmt.Sprintf("%s: hardware.prefer: unknown accelerator %q", label, p))
+				ds.add(label+".hardware.prefer", who, "%s: hardware.prefer: unknown accelerator %q", label, p)
 			}
 		}
 		for _, d := range a.DependsOn {
 			if _, ok := s.Agents[d]; !ok {
-				errs = append(errs, fmt.Sprintf("%s: depends_on names %q, which is not an agent in this workflow", label, d))
+				ds.add(label+".depends_on", who, "%s: depends_on names %q, which is not an agent in this workflow", label, d)
 			}
 			if d == name {
-				errs = append(errs, fmt.Sprintf("%s: depends_on itself", label))
+				ds.add(label+".depends_on", who, "%s: depends_on itself", label)
 			}
 		}
 		if a.MaxTokens < 0 {
-			errs = append(errs, label+": max_tokens cannot be negative")
+			ds.add(label+".max_tokens", who, "%s: max_tokens cannot be negative", label)
 		}
 		if a.Restart < 0 {
-			errs = append(errs, label+": restart cannot be negative")
+			ds.add(label+".restart", who, "%s: restart cannot be negative", label)
 		}
 	}
 
-	errs = append(errs, s.validateRouting()...)
-	errs = append(errs, s.validateState()...)
+	ds = append(ds, s.validateRouting()...)
+	ds = append(ds, s.validateState()...)
 
 	switch s.Network.Isolation {
 	case "", IsolationProcess, IsolationNamespace, IsolationNone:
 	default:
-		errs = append(errs, fmt.Sprintf("network.isolation must be %s, %s or %s, got %q",
-			IsolationProcess, IsolationNamespace, IsolationNone, s.Network.Isolation))
+		ds.add("network.isolation", nil, "network.isolation must be %s, %s or %s, got %q",
+			IsolationProcess, IsolationNamespace, IsolationNone, s.Network.Isolation)
 	}
 
 	// Cycle detection runs last: it needs the edge set to be sane, and a
 	// cycle report naming agents that do not exist is worse than useless.
-	if len(errs) == 0 {
+	if len(ds) == 0 {
 		if _, err := s.Order(); err != nil {
-			errs = append(errs, err.Error())
+			var cyc *CycleError
+			if errors.As(err, &cyc) {
+				ds.add("agents", cyc.Agents, "%s", err.Error())
+			} else {
+				ds.add("", nil, "%s", err.Error())
+			}
 		}
 	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("invalid %s:\n  - %s", FileName, strings.Join(errs, "\n  - "))
-	}
-	return nil
+	return ds
 }
 
-func (s *Spec) validateRouting() []string {
-	var errs []string
+func (s *Spec) validateRouting() diagnostics {
+	var ds diagnostics
 	seen := map[string]bool{}
 	for i, r := range s.Routing {
-		label := fmt.Sprintf("routing[%d]", i)
+		at := fmt.Sprintf("routing[%d]", i)
+		label := at
+		var who []string
 		if r.From != "" && r.To != "" {
 			label = fmt.Sprintf("routing[%d] (%s → %s)", i, r.From, r.To)
+			who = []string{r.From, r.To}
 		}
 		if r.From == "" {
-			errs = append(errs, label+": from is required")
+			ds.add(at+".from", who, "%s: from is required", label)
 		} else if _, ok := s.Agents[r.From]; !ok {
-			errs = append(errs, fmt.Sprintf("%s: from names %q, which is not an agent in this workflow", label, r.From))
+			ds.add(at+".from", who, "%s: from names %q, which is not an agent in this workflow", label, r.From)
 		}
 		if r.To == "" {
-			errs = append(errs, label+": to is required")
+			ds.add(at+".to", who, "%s: to is required", label)
 		} else if _, ok := s.Agents[r.To]; !ok {
-			errs = append(errs, fmt.Sprintf("%s: to names %q, which is not an agent in this workflow", label, r.To))
+			ds.add(at+".to", who, "%s: to names %q, which is not an agent in this workflow", label, r.To)
 		}
 		if r.From != "" && r.From == r.To {
-			errs = append(errs, label+": an agent cannot route to itself")
+			ds.add(at, who, "%s: an agent cannot route to itself", label)
 		}
 
 		// Two routes on one edge would deliver the sender's output twice,
@@ -290,7 +332,7 @@ func (s *Spec) validateRouting() []string {
 		key := r.From + "\x00" + r.To
 		if r.From != "" && r.To != "" {
 			if seen[key] {
-				errs = append(errs, fmt.Sprintf("%s: duplicate route — this edge is already declared", label))
+				ds.add(at, who, "%s: duplicate route — this edge is already declared", label)
 			}
 			seen[key] = true
 		}
@@ -300,19 +342,19 @@ func (s *Spec) validateRouting() []string {
 			cond = CondAlways
 		}
 		if err := CheckCondition(cond, s.AgentNames()); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: condition: %v", label, err))
+			ds.add(at+".condition", who, "%s: condition: %v", label, err)
 		}
 		if r.Transform != "" {
 			if err := CheckTransform(r.Transform); err != nil {
-				errs = append(errs, fmt.Sprintf("%s: transform: %v", label, err))
+				ds.add(at+".transform", who, "%s: transform: %v", label, err)
 			}
 		}
 	}
-	return errs
+	return ds
 }
 
-func (s *Spec) validateState() []string {
-	var errs []string
+func (s *Spec) validateState() diagnostics {
+	var ds diagnostics
 	switch s.SharedState.Backend {
 	case "", StateMemory, StateFile:
 	case "sqlite":
@@ -321,26 +363,26 @@ func (s *Spec) validateState() []string {
 		// static cross-compilation to the 32-bit ARM targets NexusRun
 		// exists to reach — so the file backend provides what SQLite was
 		// wanted for (durable, single-file, survives a crash) at no size cost.
-		errs = append(errs, fmt.Sprintf(
+		ds.add("shared_state.backend", nil,
 			"shared_state.backend: sqlite is not supported — it would cost more binary than the whole runtime. Use %q for a durable single-file bus, or %q for an ephemeral one",
-			StateFile, StateMemory))
+			StateFile, StateMemory)
 	default:
-		errs = append(errs, fmt.Sprintf("shared_state.backend must be %s or %s, got %q",
-			StateMemory, StateFile, s.SharedState.Backend))
+		ds.add("shared_state.backend", nil, "shared_state.backend must be %s or %s, got %q",
+			StateMemory, StateFile, s.SharedState.Backend)
 	}
 	if s.SharedState.Backend == StateMemory && s.SharedState.Path != "" {
-		errs = append(errs, "shared_state.path is set but the memory backend never writes a file")
+		ds.add("shared_state.path", nil, "shared_state.path is set but the memory backend never writes a file")
 	}
 	switch s.SharedState.Encryption {
 	case "", EncryptionAESGCM:
 	default:
-		errs = append(errs, fmt.Sprintf("shared_state.encryption must be %q, got %q",
-			EncryptionAESGCM, s.SharedState.Encryption))
+		ds.add("shared_state.encryption", nil, "shared_state.encryption must be %q, got %q",
+			EncryptionAESGCM, s.SharedState.Encryption)
 	}
 	if s.SharedState.Encryption != "" && s.SharedState.Backend != StateFile {
-		errs = append(errs, "shared_state.encryption applies to the file backend; the memory bus never leaves the process")
+		ds.add("shared_state.encryption", nil, "shared_state.encryption applies to the file backend; the memory bus never leaves the process")
 	}
-	return errs
+	return ds
 }
 
 // Marshal serializes the workflow back to YAML.
