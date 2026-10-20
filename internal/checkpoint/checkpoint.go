@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -50,7 +51,11 @@ const (
 
 	// magic prefixes an encrypted checkpoint so a wrong passphrase and a
 	// plain gzip file are distinguishable failures.
-	magic = "NEXUSSTATE1\n"
+	magic = "NEXUSSTATE2\n"
+
+	// magicLegacy marks checkpoints written before the passphrase was stretched.
+	// They are still readable, but nothing writes them any more.
+	magicLegacy = "NEXUSSTATE1\n"
 )
 
 // Entries inside the archive.
@@ -307,8 +312,8 @@ func Load(r io.Reader, opts LoadOptions) (*Restored, error) {
 	head = head[:n]
 
 	var body io.Reader
-	if string(head) == magic {
-		dec, derr := newFrameReader(r)
+	if string(head) == magic || string(head) == magicLegacy {
+		dec, derr := newFrameReader(r, string(head) == magicLegacy)
 		if derr != nil {
 			return nil, derr
 		}
@@ -540,15 +545,28 @@ func List(s *store.Store, sessionName string) ([]*Stored, error) {
 
 // --- crypto ---------------------------------------------------------------
 
-func stateKey() ([]byte, error) {
+// kdfIterations is the PBKDF2-HMAC-SHA256 work factor (OWASP's figure for
+// SHA-256). PBKDF2 is in the standard library and FIPS 140 approved, which
+// keeps the binary static and free of extra dependencies.
+const kdfIterations = 600_000
+
+// saltSize is the per-checkpoint random salt stored after the magic.
+const saltSize = 16
+
+// stateKey derives the checkpoint key. A nil salt reads a legacy checkpoint,
+// whose key was a single unsalted SHA-256 of the passphrase.
+func stateKey(salt []byte) ([]byte, error) {
 	raw := os.Getenv(StateKeyEnv)
 	if strings.TrimSpace(raw) == "" {
 		return nil, fmt.Errorf(
 			"this checkpoint is encrypted, but %s is not set — export the key it was written with",
 			StateKeyEnv)
 	}
-	sum := sha256.Sum256([]byte(raw))
-	return sum[:], nil
+	if salt == nil {
+		sum := sha256.Sum256([]byte(raw))
+		return sum[:], nil
+	}
+	return pbkdf2.Key(sha256.New, raw, salt, kdfIterations, 32)
 }
 
 // chunkSize is the plaintext per frame. Large enough that framing overhead
@@ -572,11 +590,20 @@ type frameWriter struct {
 	index uint64
 }
 
+// newFrameWriter writes the salt that follows the magic, then seals frames
+// under the key derived from it.
 func newFrameWriter(w io.Writer) (*frameWriter, error) {
-	key, err := stateKey()
+	salt := make([]byte, saltSize)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	key, err := stateKey(salt)
 	if err != nil {
 		// Writing has its own phrasing: nothing is encrypted yet.
 		return nil, fmt.Errorf("--encrypt needs %s to be set", StateKeyEnv)
+	}
+	if _, err := w.Write(salt); err != nil {
+		return nil, err
 	}
 	gcm, err := newGCM(key)
 	if err != nil {
@@ -634,8 +661,15 @@ type frameReader struct {
 	done  bool
 }
 
-func newFrameReader(r io.Reader) (*frameReader, error) {
-	key, err := stateKey()
+func newFrameReader(r io.Reader, legacy bool) (*frameReader, error) {
+	var salt []byte
+	if !legacy {
+		salt = make([]byte, saltSize)
+		if _, err := io.ReadFull(r, salt); err != nil {
+			return nil, fmt.Errorf("encrypted checkpoint is truncated")
+		}
+	}
+	key, err := stateKey(salt)
 	if err != nil {
 		return nil, err
 	}

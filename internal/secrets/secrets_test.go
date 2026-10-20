@@ -1,6 +1,8 @@
 package secrets
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -457,5 +459,43 @@ func TestAuditFiltersByAgent(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Agent != "a" {
 		t.Errorf("entries = %+v", entries)
+	}
+}
+
+func TestBackupIsSaltedAndLegacyBackupsStillImport(t *testing.T) {
+	_, st := testStore(t)
+	if err := st.Set("a", "K1", "plaintext-alpha", SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	one, err := st.Export("a", "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := st.Export("a", "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(one), backupHeaderV2+"\n") {
+		t.Fatalf("new backups must be %s, got %q", backupHeaderV2, strings.SplitN(string(one), "\n", 2)[0])
+	}
+	if string(one) == string(two) {
+		t.Error("two exports of the same secrets were identical; salt and nonce must be fresh")
+	}
+
+	// A backup written by an older build: one unsalted SHA-256 of the passphrase.
+	body := []byte(`[{"agent":"a","key":"K9","plain":"legacy-value"}]`)
+	sum := sha256.Sum256([]byte("old-pass"))
+	gcm, err := newGCM(sum[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	legacy := append([]byte(backupHeaderV1+"\n"), []byte(base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, body, nil)))...)
+
+	if n, err := st.Import(legacy, "old-pass"); err != nil || n != 1 {
+		t.Fatalf("legacy import: n=%d err=%v", n, err)
+	}
+	if got, _ := st.Reveal("a", "K9", ""); got != "legacy-value" {
+		t.Errorf("K9 = %q", got)
 	}
 }

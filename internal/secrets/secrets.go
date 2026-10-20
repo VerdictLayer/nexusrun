@@ -17,6 +17,7 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -428,6 +429,21 @@ func (st *Store) Env(agent, device string, keys []string, grace time.Duration) (
 
 // --- backup ---------------------------------------------------------------
 
+const (
+	backupHeaderV1 = "nexusrun-secrets-v1"
+	backupHeaderV2 = "nexusrun-secrets-v2"
+	backupSaltSize = 16
+	// backupKDFIterations is PBKDF2-HMAC-SHA256 at OWASP's recommended work
+	// factor. It is in the standard library, so no extra dependency.
+	backupKDFIterations = 600_000
+)
+
+// backupKey stretches a passphrase with a per-backup salt, so a stolen backup
+// costs real work per guess instead of one hash.
+func backupKey(passphrase string, salt []byte) ([]byte, error) {
+	return pbkdf2.Key(sha256.New, passphrase, salt, backupKDFIterations, 32)
+}
+
 // Export writes an encrypted backup. The payload is re-encrypted under a
 // passphrase rather than the master key, so a backup is portable to a
 // machine that does not have this machine's key.
@@ -460,8 +476,15 @@ func (st *Store) Export(agent, passphrase string) ([]byte, error) {
 		return nil, err
 	}
 
-	sum := sha256.Sum256([]byte(passphrase))
-	gcm, err := newGCM(sum[:])
+	salt := make([]byte, backupSaltSize)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return nil, err
+	}
+	key, err := backupKey(passphrase, salt)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := newGCM(key)
 	if err != nil {
 		return nil, err
 	}
@@ -469,11 +492,11 @@ func (st *Store) Export(agent, passphrase string) ([]byte, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
 	}
-	sealed := gcm.Seal(nonce, nonce, body, nil)
+	sealed := append(salt, gcm.Seal(nonce, nonce, body, []byte(backupHeaderV2))...)
 
 	st.audit("export", agent, "", fmt.Sprintf("%d secret(s)", len(entries)))
 	// Framed so an import can tell a truncated file from a wrong passphrase.
-	out := append([]byte("nexusrun-secrets-v1\n"), []byte(base64.StdEncoding.EncodeToString(sealed))...)
+	out := append([]byte(backupHeaderV2+"\n"), []byte(base64.StdEncoding.EncodeToString(sealed))...)
 	return append(out, '\n'), nil
 }
 
@@ -481,22 +504,38 @@ func (st *Store) Export(agent, passphrase string) ([]byte, error) {
 func (st *Store) Import(data []byte, passphrase string) (int, error) {
 	text := strings.TrimSpace(string(data))
 	header, body, ok := strings.Cut(text, "\n")
-	if !ok || strings.TrimSpace(header) != "nexusrun-secrets-v1" {
+	header = strings.TrimSpace(header)
+	if !ok || (header != backupHeaderV1 && header != backupHeaderV2) {
 		return 0, fmt.Errorf("not a NexusRun secrets backup")
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
 	if err != nil {
 		return 0, fmt.Errorf("backup is corrupt: %w", err)
 	}
-	sum := sha256.Sum256([]byte(passphrase))
-	gcm, err := newGCM(sum[:])
+	// Version 1 backups used one unsalted SHA-256 of the passphrase. They are
+	// still readable; every new export is version 2.
+	var key, aad []byte
+	if header == backupHeaderV2 {
+		if len(raw) < backupSaltSize {
+			return 0, fmt.Errorf("backup is truncated")
+		}
+		var kerr error
+		if key, kerr = backupKey(passphrase, raw[:backupSaltSize]); kerr != nil {
+			return 0, kerr
+		}
+		raw, aad = raw[backupSaltSize:], []byte(backupHeaderV2)
+	} else {
+		sum := sha256.Sum256([]byte(passphrase))
+		key = sum[:]
+	}
+	gcm, err := newGCM(key)
 	if err != nil {
 		return 0, err
 	}
 	if len(raw) < gcm.NonceSize() {
 		return 0, fmt.Errorf("backup is truncated")
 	}
-	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], aad)
 	if err != nil {
 		return 0, fmt.Errorf("decrypt failed — wrong passphrase for this backup")
 	}

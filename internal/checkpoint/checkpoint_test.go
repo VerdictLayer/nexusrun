@@ -351,3 +351,56 @@ func TestReorderedFramesAreRejected(t *testing.T) {
 		t.Fatal("tampering with a frame should fail authentication")
 	}
 }
+
+func TestEncryptionUsesAFreshSaltEachTime(t *testing.T) {
+	t.Setenv(StateKeyEnv, "a shared passphrase")
+	var a, b bytes.Buffer
+	for _, buf := range []*bytes.Buffer{&a, &b} {
+		if _, err := Save(buf, sampleSession(), SaveOptions{Encrypt: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.HasPrefix(a.String(), magic) {
+		t.Fatalf("new checkpoints must carry the current magic")
+	}
+	salt := func(b *bytes.Buffer) string { return string(b.Bytes()[len(magic) : len(magic)+saltSize]) }
+	if salt(&a) == salt(&b) {
+		t.Error("two checkpoints shared a salt")
+	}
+}
+
+func TestLegacyEncryptedCheckpointStillLoads(t *testing.T) {
+	t.Setenv(StateKeyEnv, "a shared passphrase")
+	var plain bytes.Buffer
+	if _, err := Save(&plain, sampleSession(), SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rebuild what an older build wrote: legacy magic, then frames under an
+	// unsalted SHA-256 of the passphrase.
+	key, err := stateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := newGCM(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old bytes.Buffer
+	old.WriteString(magicLegacy)
+	fw := &frameWriter{w: &old, gcm: gcm, buf: make([]byte, 0, chunkSize)}
+	if _, err := fw.Write(plain.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := fw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Load(bytes.NewReader(old.Bytes()), LoadOptions{})
+	if err != nil {
+		t.Fatalf("legacy checkpoint should load: %v", err)
+	}
+	if len(res.Session.Messages) != 4 {
+		t.Errorf("restored %d messages", len(res.Session.Messages))
+	}
+}
