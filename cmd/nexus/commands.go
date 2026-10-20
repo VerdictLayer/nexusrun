@@ -31,6 +31,7 @@ import (
 	"github.com/verdictlayer/nexusrun/internal/hardware"
 	"github.com/verdictlayer/nexusrun/internal/manifest"
 	"github.com/verdictlayer/nexusrun/internal/mcp"
+	"github.com/verdictlayer/nexusrun/internal/modelscan"
 	"github.com/verdictlayer/nexusrun/internal/runner"
 	"github.com/verdictlayer/nexusrun/internal/sandbox"
 	"github.com/verdictlayer/nexusrun/internal/secrets"
@@ -1903,24 +1904,71 @@ func newBenchExportCmd() *cobra.Command {
 }
 
 func newModelsCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	var dirs []string
+	var ctxLen int
+	cmd := &cobra.Command{
 		Use:   "models",
-		Short: "List models available locally (including Ollama's)",
+		Short: "List models on this machine and whether it can run them",
+		Long: `List the models NexusRun can use without downloading anything: Ollama's,
+the ones NexusRun has already downloaded, and any .gguf files under the folders
+you name with --dir (or NEXUSRUN_MODEL_DIRS, a ` + string(os.PathListSeparator) + `-separated list).
+Nothing outside those places is read.
+
+Each model is judged against this machine's memory at the given context size.
+The figure is an estimate (weights, key/value cache and runtime overhead), not a
+measurement: "fits" leaves headroom, "tight" may run, "too_large" will not.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			models := store.ListOllamaModels()
+			s, err := store.Open()
+			if err != nil {
+				return err
+			}
+			if env := os.Getenv("NEXUSRUN_MODEL_DIRS"); env != "" {
+				dirs = append(dirs, filepath.SplitList(env)...)
+			}
+			models := modelscan.Scan(modelscan.Options{Store: s, Dirs: dirs, Context: ctxLen})
+			if jsonOut {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if models == nil {
+					models = []modelscan.Model{}
+				}
+				return enc.Encode(map[string]any{"models": models, "hardware": hardware.Detect()})
+			}
 			if len(models) == 0 {
 				fmt.Println("No local models found.")
 				fmt.Println("NexusRun can reuse models from Ollama, or download from Hugging Face:")
 				fmt.Println("  source: hf:bartowski/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q4_K_M.gguf")
+				fmt.Println("Add a folder of .gguf files with --dir.")
 				return nil
 			}
-			fmt.Printf("Reusable from Ollama (no re-download):\n")
 			for _, m := range models {
-				fmt.Printf("  ollama:%s\n", m)
+				if m.Error != "" {
+					fmt.Printf("  %-44s unreadable: %s\n", m.Ref, m.Error)
+					continue
+				}
+				fmt.Printf("  %-44s %-6s %-8s %6.1f GB  %s\n", m.Ref, m.Parameters, m.Quantization, float64(m.SizeBytes)/(1<<30), fitSummary(m))
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit the models and this machine's hardware as JSON")
+	cmd.Flags().StringArrayVar(&dirs, "dir", nil, "also search this folder for .gguf files (repeatable)")
+	cmd.Flags().IntVar(&ctxLen, "context", modelscan.DefaultContext, "context window tokens to estimate memory for")
+	return cmd
+}
+
+// fitSummary is the best verdict across this machine's devices, in words.
+func fitSummary(m modelscan.Model) string {
+	best, rank := "", -1
+	order := map[string]int{"too_large": 0, "unknown": 1, "tight": 2, "fits": 3}
+	for _, f := range m.Fit {
+		if r := order[f.Verdict]; r > rank {
+			best, rank = f.Device+": "+strings.ReplaceAll(f.Verdict, "_", " "), r
+		}
+	}
+	return best
 }
 
 // --- logs / serve ---------------------------------------------------------

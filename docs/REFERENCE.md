@@ -290,7 +290,21 @@ comparable — different suite, unit build, weights, or temperature.
 `--json` available.
 
 #### `nexus models`
-List models available locally, including ones Ollama already pulled.
+List the models on this machine and whether it can run them: Ollama's, the ones
+NexusRun already downloaded, and any `.gguf` files under folders you name.
+Nothing outside those places is read.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--dir` | none | Also search this folder for `.gguf` files (repeatable; or set `NEXUSRUN_MODEL_DIRS`) |
+| `--context` | `4096` | Context window tokens to estimate memory for |
+| `--json` | `false` | Emit the models and this machine's hardware as JSON |
+
+Each model shows its parameters, quantization and size read from the file header,
+and a verdict per device: `fits` (leaves headroom), `tight`, `too_large`, or
+`unknown` when the device's memory is not known. The verdict is an estimate of
+memory (weights, key/value cache and runtime overhead) and says nothing about
+speed. The `ref` of each model is what goes in `model:` or `source:`.
 
 #### `nexus logs [run-id]`
 Show run history, or one run's captured output. `--json` available.
