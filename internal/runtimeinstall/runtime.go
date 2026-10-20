@@ -162,7 +162,7 @@ func Install(ctx context.Context, s *store.Store, r Release, progress store.Prog
 		return err
 	}
 	if done > maxArchiveBytes {
-		return fmt.Errorf("download %s %s: larger than the %d byte limit", r.Name, r.Version, maxArchiveBytes)
+		return fmt.Errorf("download %s %s: larger than the %d byte limit", r.Name, r.Version, int64(maxArchiveBytes))
 	}
 	got := hex.EncodeToString(h.Sum(nil))
 	if got != strings.TrimPrefix(r.SHA256, "sha256:") {
