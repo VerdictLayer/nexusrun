@@ -73,7 +73,7 @@ supported-host deployment.
 The most important design decision, and the one that came directly from
 building it.
 
-The development machine has a Quadro RTX 5000 with a working driver —
+The development machine has an NVIDIA GPU with a working driver —
 `nvidia-smi` reports it, and so does `nexus doctor`. It also has a llama.cpp
 compiled without CUDA, so `llama-cli --list-devices` returns nothing and that
 GPU is unreachable in practice. A tool that detected the GPU and scheduled onto

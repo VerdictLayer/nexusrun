@@ -18,7 +18,7 @@ Same unit. Same model digest. One machine. Two backends:
 Suite:    code-reviewer-basics (13 cases × 1 repeat(s))
 Unit:     code-reviewer:0.1.0
 Model:    ollama:phi3:latest · Q4_0 · 633fc5be925f
-Host:     linux/amd64 · Intel(R) Xeon(R) W-10885M CPU @ 2.40GHz
+Host:     linux/amd64 · Intel(R) Xeon(R) CPU
 Sampling: temperature 0.00 · max 128 tokens
 
   DEVICE   BACKEND              PASS     RATE   FLAKY       tok/s

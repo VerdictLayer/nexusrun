@@ -140,7 +140,7 @@ schedule against — see `engine.Select`. Never schedule on detection
 alone, and never assume a device is usable because it was detected.
 
 The development machine is the reason both rules exist: it has a working
-Quadro RTX 5000 that `nexus doctor` detects correctly, and a llama.cpp
+NVIDIA GPU that `nexus doctor` detects correctly, and a llama.cpp
 compiled without CUDA that cannot touch it. Detection alone would have
 promised GPU acceleration and silently delivered CPU speeds.
 

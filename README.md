@@ -126,14 +126,14 @@ Most tools check whether a GPU or NPU exists and assume it works. In practice
 it often doesn't: llama.cpp may have been compiled CPU-only, a driver may be
 half-upgraded, or an NPU may have no execution provider installed.
 
-`nexus doctor` reports these separately. Real output from the development
-machine, which has a healthy Quadro RTX 5000 in it:
+`nexus doctor` reports these separately. Output from a workstation with a
+healthy NVIDIA GPU, with the hardware names shortened:
 
 ```
 Detected hardware
-  linux/amd64 · Intel(R) Xeon(R) W-10885M CPU @ 2.40GHz (16 cores, avx2/avx/sse42) · 125.6 GB RAM
-    [GPU] nvidia Quadro RTX 5000 (16.0 GB) → llama.cpp/cuda
-    [CPU] intel Intel(R) Xeon(R) W-10885M CPU @ 2.40GHz → llama.cpp/cpu
+  linux/amd64 · Intel(R) Xeon(R) CPU (16 cores, avx2/avx/sse42)
+    [GPU] nvidia NVIDIA GPU (16.0 GB) → llama.cpp/cuda
+    [CPU] intel Intel(R) Xeon(R) CPU → llama.cpp/cpu
 
 Backend capability
   llama.cpp        ready        CPU-only build (no GPU backend compiled in)
