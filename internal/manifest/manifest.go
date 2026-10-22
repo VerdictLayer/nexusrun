@@ -25,6 +25,9 @@ const (
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
+// pinRe is a sha256 integrity pin, with or without its "sha256:" prefix.
+var pinRe = regexp.MustCompile(`^(sha256:)?[a-f0-9]{64}$`)
+
 // Model describes one model the unit depends on. Models are referenced,
 // not embedded: the runtime resolves Source into a shared local cache so
 // units stay small and models are deduplicated across units.
@@ -452,6 +455,10 @@ func (m *Manifest) validateModels() []string {
 			seenID[mod.ID] = true
 		}
 
+		if mod.SHA256 != "" && !pinRe.MatchString(mod.SHA256) {
+			errs = append(errs, label+": sha256 must be 64 lowercase hex digits, optionally prefixed with sha256:")
+		}
+
 		if !mod.Auto() {
 			if mod.SizeBytes < 0 {
 				errs = append(errs, label+": size_bytes cannot be negative")
@@ -499,6 +506,9 @@ func validateAutoModel(label string, mod Model) []string {
 		}
 		if c.SizeBytes < 0 {
 			errs = append(errs, clabel+": size_bytes cannot be negative")
+		}
+		if c.SHA256 != "" && !pinRe.MatchString(c.SHA256) {
+			errs = append(errs, clabel+": sha256 must be 64 lowercase hex digits, optionally prefixed with sha256:")
 		}
 	}
 

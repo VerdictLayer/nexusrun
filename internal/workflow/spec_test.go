@@ -258,3 +258,23 @@ func TestKindMustBeWorkflow(t *testing.T) {
 		t.Fatalf("expected a kind error, got %v", err)
 	}
 }
+
+// A pulled workflow must not choose where on the machine its bus writes.
+func TestStatePathStaysInsideTheWorkflowFolder(t *testing.T) {
+	for path, ok := range map[string]bool{
+		"./.nexus/state.jsonl":  true,
+		"state/bus.jsonl":       true,
+		"/home/user/.bashrc":    false,
+		"../../.ssh/rc":         false,
+		"./a/../../escape.json": false,
+	} {
+		src := strings.Replace(validSpec, "shared_state:\n  backend: memory", "shared_state:\n  backend: file\n  path: "+path, 1)
+		_, err := Parse([]byte(src))
+		if ok && err != nil {
+			t.Errorf("%s: rejected: %v", path, err)
+		}
+		if !ok && (err == nil || !strings.Contains(err.Error(), "shared_state.path")) {
+			t.Errorf("%s: err = %v, want a shared_state.path error", path, err)
+		}
+	}
+}

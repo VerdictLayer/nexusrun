@@ -3,9 +3,13 @@
 package sandbox
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -196,6 +200,75 @@ func TestApplyDeniesAllInternetSocketsWithoutNetworkCapability(t *testing.T) {
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("sandboxed child (network=%s) failed: %v\n%s", net, err, out)
+		}
+	}
+}
+
+// A UNIX socket created outside the sandbox is a door out of it: the Docker
+// socket starts a container with the host's root filesystem mounted, and the
+// session bus asks systemd to run any command unconfined. Neither the
+// filesystem policy before Landlock ABI 9 nor the network capability says
+// anything about them, so a sandboxed process must not reach one at all,
+// with or without the network capability.
+func TestApplyBlocksUnixSocketsCreatedOutsideTheSandbox(t *testing.T) {
+	if !Supported() {
+		t.Skip("kernel lacks Landlock")
+	}
+	if os.Getenv("NEXUSRUN_SANDBOX_CHILD") == "1" {
+		var caps []string
+		if os.Getenv("NEXUSRUN_SANDBOX_NET") == "1" {
+			caps = []string{"network"}
+		}
+		if err := Apply(FromCapabilities(caps, os.Getenv("NEXUSRUN_SANDBOX_DIR"), "")); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		for _, addr := range []string{os.Getenv("NEXUSRUN_SANDBOX_SOCK"), "@" + os.Getenv("NEXUSRUN_SANDBOX_ABSTRACT")} {
+			if c, err := net.Dial("unix", addr); err == nil {
+				c.Close()
+				t.Errorf("connected to %s, a socket created outside the sandbox", addr)
+			}
+		}
+		// io_uring creates sockets without socket(2), out of the filter's sight.
+		var params [120]byte
+		if fd, _, errno := unix.Syscall(unix.SYS_IO_URING_SETUP, 1, uintptr(unsafe.Pointer(&params[0])), 0); errno == 0 {
+			unix.Close(int(fd))
+			t.Error("io_uring_setup succeeded inside the sandbox")
+		}
+		// Pipes and socket pairs between a process and its own children
+		// still work; runtimes use them for subprocess plumbing.
+		fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+		if err != nil {
+			t.Fatalf("AF_UNIX socketpair denied: %v", err)
+		}
+		unix.Close(fds[0])
+		unix.Close(fds[1])
+		return
+	}
+
+	sock := filepath.Join(t.TempDir(), "outside.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("cannot create a unix socket: %v", err)
+	}
+	defer ln.Close()
+	abstract := fmt.Sprintf("nexusrun-sandbox-test-%d", os.Getpid())
+	aln, err := net.Listen("unix", "@"+abstract)
+	if err != nil {
+		t.Skipf("cannot create an abstract unix socket: %v", err)
+	}
+	defer aln.Close()
+
+	for _, network := range []string{"0", "1"} {
+		cmd := exec.Command(os.Args[0], "-test.run=TestApplyBlocksUnixSocketsCreatedOutsideTheSandbox", "-test.v")
+		cmd.Env = append(os.Environ(),
+			"NEXUSRUN_SANDBOX_CHILD=1",
+			"NEXUSRUN_SANDBOX_NET="+network,
+			"NEXUSRUN_SANDBOX_DIR="+t.TempDir(),
+			"NEXUSRUN_SANDBOX_SOCK="+sock,
+			"NEXUSRUN_SANDBOX_ABSTRACT="+abstract,
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("sandboxed child (network=%s) failed: %v\n%s", network, err, out)
 		}
 	}
 }

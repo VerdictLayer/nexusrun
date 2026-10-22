@@ -4,9 +4,11 @@ package sandbox
 // the unit's declared `capabilities:` — anything not declared is denied.
 type Policy struct {
 	// AllowNetwork permits network sockets. When false, a seccomp filter
-	// refuses every socket except local (AF_UNIX) and netlink ones, so a
-	// unit cannot open TCP, UDP (including DNS) or raw connections on any
-	// kernel. Abstract AF_UNIX sockets are not scoped.
+	// refuses every socket except netlink ones, so a unit cannot open TCP,
+	// UDP (including DNS) or raw connections on any kernel. AF_UNIX sockets
+	// are refused either way: one created outside the sandbox, such as the
+	// Docker socket or the session bus, would let a unit run commands
+	// outside it. socketpair(2) still works.
 	AllowNetwork bool
 
 	// ReadOnlyPaths are readable but not writable, in addition to the

@@ -159,7 +159,7 @@ func (p *Pool) Run(ctx context.Context, req RunRequest) (*RunResponse, error) {
 	rec.TokensOut = res.TokensOut
 	rec.TokPerSec = res.EvalTPS
 	_ = p.store.SaveRun(rec)
-	_ = os.WriteFile(p.store.LogPath(runID), []byte(res.Text), 0o644)
+	_ = os.WriteFile(p.store.LogPath(runID), []byte(res.Text), 0o600)
 
 	return &RunResponse{
 		Text:      res.Text,

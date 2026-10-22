@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -438,6 +439,10 @@ func ExportFile(ctx context.Context, s *store.Store, ref, out string) error {
 	return tarDirTo(tmpDir, f)
 }
 
+// importRefPattern is what a tag in an imported file may look like: a name,
+// optionally with a registry path, and a version.
+var importRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,254}$`)
+
 // ImportFile loads a portable .nx artifact into the local store.
 func ImportFile(ctx context.Context, s *store.Store, path string) ([]string, error) {
 	tmpDir, err := os.MkdirTemp("", "nexus-import-*")
@@ -469,6 +474,13 @@ func ImportFile(ctx context.Context, s *store.Store, path string) ([]string, err
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	for _, ref := range imported {
+		// The tag names come from the file, and they are printed to the
+		// terminal and shown in the console, so only plain references pass.
+		if !importRefPattern.MatchString(ref) {
+			return nil, fmt.Errorf("refusing to import %q: not a valid unit reference", ref)
+		}
 	}
 	for _, ref := range imported {
 		if _, err := oras.Copy(ctx, src, ref, dst, ref, oras.DefaultCopyOptions); err != nil {
@@ -522,7 +534,13 @@ func RegistryToken(registry string) string { return credentialFor(registry).Pass
 // `nexus login` is used. Docker config file support is intentionally deferred.
 func credentialFor(registry string) auth.Credential {
 	user := firstEnv("NEXUSRUN_REGISTRY_USER", "REGISTRY_USER")
-	pass := firstEnv("NEXUSRUN_REGISTRY_PASSWORD", "REGISTRY_PASSWORD", "GITHUB_TOKEN")
+	pass := firstEnv("NEXUSRUN_REGISTRY_PASSWORD", "REGISTRY_PASSWORD")
+	// GITHUB_TOKEN is set in every GitHub Actions job and is a GitHub
+	// credential, so it goes to GitHub's registry and nowhere else. A
+	// reference naming any other host must not be able to collect it.
+	if pass == "" && registry == "ghcr.io" {
+		pass = os.Getenv("GITHUB_TOKEN")
+	}
 	if user != "" || pass != "" {
 		return auth.Credential{Username: user, Password: pass}
 	}

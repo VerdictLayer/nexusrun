@@ -638,7 +638,7 @@ usable, the first available backend's most capable device is used — and
 | `NEXUS_BACKUP_KEY` | — | Passphrase for `secret export` / `secret import` |
 | `NEXUS_DEVICE_ID` | — | Names this machine, selecting device-scoped secrets |
 | `NEXUSRUN_REGISTRY_USER` | falls back to `REGISTRY_USER` | Registry username |
-| `NEXUSRUN_REGISTRY_PASSWORD` | falls back to `REGISTRY_PASSWORD`, then `GITHUB_TOKEN` | Registry password or token |
+| `NEXUSRUN_REGISTRY_PASSWORD` | falls back to `REGISTRY_PASSWORD`, then `GITHUB_TOKEN` for `ghcr.io` only | Registry password or token |
 | `NEXUSRUN_REGISTRY_INSECURE` | unset | Set to exactly `1` to allow plain HTTP to a non-local registry |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama server to use |
 | `OLLAMA_MODELS` | *(standard dirs)* | Ollama model directory to borrow from |

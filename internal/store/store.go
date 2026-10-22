@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -37,6 +38,11 @@ func Open() (*Store, error) {
 		root = filepath.Join(home, ".nexusrun")
 	}
 	s := &Store{Root: root}
+	// Run logs hold what the models said, so the home is private to this
+	// user. MkdirAll leaves an existing directory's mode alone.
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, err
+	}
 	for _, d := range []string{s.BlobsDir(), s.UnitsDir(), s.LogsDir(), s.EvalsDir()} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
@@ -54,6 +60,26 @@ func (s *Store) LogsDir() string  { return filepath.Join(s.Root, "logs") }
 // triple, not to the unit alone — the same artifact scores differently on
 // different machines, and both numbers are worth keeping.
 func (s *Store) EvalsDir() string { return filepath.Join(s.Root, "evals") }
+
+// digestPattern is the only digest shape that may become a blob path. A pin
+// comes from a unit's manifest, which is untrusted, and anything else could
+// name a file outside the blob store.
+var digestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// normalizeDigest accepts a sha256 pin with or without its "sha256:" prefix
+// and returns it in the prefixed form, or an error for anything else.
+func normalizeDigest(d string) (string, error) {
+	if d == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(d, "sha256:") {
+		d = "sha256:" + d
+	}
+	if !digestPattern.MatchString(d) {
+		return "", fmt.Errorf("sha256 pin %q must be 64 lowercase hex digits, optionally prefixed with sha256:", d)
+	}
+	return d, nil
+}
 
 // BlobPath returns the on-disk path for a sha256 hex digest.
 func (s *Store) BlobPath(digest string) string {
@@ -89,7 +115,10 @@ func (s *Store) Cached(source, wantDigest string) (*ResolvedModel, bool) {
 		m, err := resolveOllama(strings.TrimPrefix(source, "ollama:"))
 		return m, err == nil
 	case strings.HasPrefix(source, "hf:"), strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
-		digest := wantDigest
+		digest, err := normalizeDigest(wantDigest)
+		if err != nil {
+			return nil, false
+		}
 		if digest == "" {
 			digest = s.cachedDigest(source)
 		}
@@ -246,6 +275,10 @@ func hfHeaders() map[string]string {
 // download fetches a URL into the content-addressed blob store. If the
 // digest is known up front and already present, it is a no-op.
 func (s *Store) download(rawURL, wantDigest, source string, p Progress, headers map[string]string) (*ResolvedModel, error) {
+	wantDigest, err := normalizeDigest(wantDigest)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", source, err)
+	}
 	if wantDigest != "" {
 		if info, err := os.Stat(s.BlobPath(wantDigest)); err == nil {
 			return &ResolvedModel{Path: s.BlobPath(wantDigest), Digest: wantDigest, Size: info.Size(), Source: source}, nil
@@ -343,6 +376,11 @@ func (s *Store) loadDownloads() map[string]string {
 		return m
 	}
 	_ = json.Unmarshal(data, &m)
+	for source, d := range m {
+		if !digestPattern.MatchString(d) {
+			delete(m, source)
+		}
+	}
 	return m
 }
 
@@ -400,12 +438,22 @@ func ollamaRoots() []string {
 	return roots
 }
 
+// Ollama model names and tags become path elements, and the digests in its
+// manifests become blob file names, so each must be a plain name.
+var (
+	ollamaNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
+	ollamaTagPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+)
+
 // resolveOllama locates the GGUF weights layer for an Ollama model and
 // returns its blob path directly — no copy, no second download.
 func resolveOllama(ref string) (*ResolvedModel, error) {
 	name, tag, ok := strings.Cut(ref, ":")
 	if !ok || tag == "" {
 		tag = "latest"
+	}
+	if !ollamaNamePattern.MatchString(name) || !ollamaTagPattern.MatchString(tag) {
+		return nil, fmt.Errorf("invalid Ollama model name %q", ref)
 	}
 	// Unqualified names live under the library namespace.
 	repo := name
@@ -428,6 +476,9 @@ func resolveOllama(ref string) (*ResolvedModel, error) {
 		for _, l := range m.Layers {
 			if l.MediaType != "application/vnd.ollama.image.model" {
 				continue
+			}
+			if !digestPattern.MatchString(l.Digest) {
+				return nil, fmt.Errorf("ollama manifest %s has an invalid layer digest", manifestPath)
 			}
 			// Ollama stores blobs as sha256-<hex> (dash, not colon).
 			blob := filepath.Join(root, "blobs", strings.Replace(l.Digest, ":", "-", 1))
@@ -458,7 +509,7 @@ func resolveOllama(ref string) (*ResolvedModel, error) {
 // Best-effort: a missing or changed config shape costs an empty column, never
 // a failed resolve.
 func ollamaModelInfo(root, configDigest string) (quant, params string) {
-	if configDigest == "" {
+	if !digestPattern.MatchString(configDigest) {
 		return "", ""
 	}
 	data, err := os.ReadFile(filepath.Join(root, "blobs", strings.Replace(configDigest, ":", "-", 1)))
@@ -531,7 +582,7 @@ func (s *Store) SaveRun(r *RunRecord) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.LogsDir(), r.ID+".json"), data, 0o644)
+	return os.WriteFile(filepath.Join(s.LogsDir(), r.ID+".json"), data, 0o600)
 }
 
 // LogPath returns the stdout/stderr capture path for a run.

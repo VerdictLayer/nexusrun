@@ -3,6 +3,8 @@ package engine
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +40,7 @@ type LlamaServer struct {
 // serverInstance is one running llama-server process holding one model.
 type serverInstance struct {
 	port     int
+	apiKey   string
 	cmd      *exec.Cmd
 	model    string
 	device   string
@@ -164,7 +167,7 @@ func (l *LlamaServer) Generate(ctx context.Context, req Request) (*Result, error
 	if err != nil {
 		return nil, err
 	}
-	raw, err := postJSON(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", inst.port, url), body)
+	raw, err := postJSONWithKey(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", inst.port, url), body, inst.apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +330,18 @@ func (l *LlamaServer) acquire(ctx context.Context, modelPath, device string, ctx
 	if jinja {
 		args = append(args, "--jinja")
 	}
+	// Loopback is reachable by every local account and every web page, and
+	// llama-server answers browsers with permissive CORS headers. A key per
+	// process keeps its completion and slot endpoints for this process only.
+	// It goes in the environment, because a command line is visible to every
+	// user on the machine.
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, err
+	}
+	apiKey := hex.EncodeToString(secret)
 	cmd := runWithLibPath(bin, args...)
+	cmd.Env = append(cmd.Env, "LLAMA_API_KEY="+apiKey)
 	logFile, _ := os.CreateTemp("", "nexus-llama-server-*.log")
 	if logFile != nil {
 		cmd.Stdout = logFile
@@ -337,7 +351,7 @@ func (l *LlamaServer) acquire(ctx context.Context, modelPath, device string, ctx
 		return nil, fmt.Errorf("start llama-server: %w", err)
 	}
 
-	inst := &serverInstance{port: port, cmd: cmd, model: modelPath, device: device, lastUsed: time.Now()}
+	inst := &serverInstance{port: port, apiKey: apiKey, cmd: cmd, model: modelPath, device: device, lastUsed: time.Now()}
 	if err := inst.waitReady(ctx); err != nil {
 		_ = cmd.Process.Kill()
 		detail := ""
@@ -494,6 +508,11 @@ func freePort() (int, error) {
 }
 
 func postJSON(ctx context.Context, url string, body any) ([]byte, error) {
+	return postJSONWithKey(ctx, url, body, "")
+}
+
+// postJSONWithKey is postJSON with a bearer key, when apiKey is not empty.
+func postJSONWithKey(ctx context.Context, url string, body any, apiKey string) ([]byte, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -503,6 +522,9 @@ func postJSON(ctx context.Context, url string, body any) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {

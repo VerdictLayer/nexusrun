@@ -270,3 +270,26 @@ func TestRunsRoundTripNewestFirst(t *testing.T) {
 		t.Errorf("Runs()[0] = %q, want the newest record", runs[0].ID)
 	}
 }
+
+// A pin comes from a unit's manifest. If it could name a path, a unit could
+// make any existing file on the machine resolve as its "verified" model.
+func TestDigestPinCannotNameAPathOutsideTheBlobStore(t *testing.T) {
+	s := testStore(t)
+	outside := filepath.Join(s.Root, "outside.gguf")
+	if err := os.WriteFile(outside, []byte("not a model"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pin := "sha256:../../outside.gguf"
+	if m, err := s.Resolve("https://example.invalid/m.gguf", pin, nil); err == nil {
+		t.Fatalf("resolved %s through a traversing pin", m.Path)
+	}
+	if m, ok := s.Cached("https://example.invalid/m.gguf", pin); ok {
+		t.Fatalf("cache hit on %s through a traversing pin", m.Path)
+	}
+}
+
+func TestOllamaNameCannotLeaveTheManifestTree(t *testing.T) {
+	if _, err := resolveOllama("../../../../tmp/x:latest"); err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("err = %v, want an invalid-name error", err)
+	}
+}

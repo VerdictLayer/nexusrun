@@ -43,3 +43,14 @@ func TestNoLoginForAnotherRegistry(t *testing.T) {
 		t.Fatalf("leaked the nexusrun login to ghcr.io: %+v", c)
 	}
 }
+
+func TestGitHubTokenGoesOnlyToGitHub(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("GITHUB_TOKEN", "ghs_actions")
+	if c := credentialFor("ghcr.io"); c.Password != "ghs_actions" {
+		t.Fatalf("ghcr.io credential = %+v, want GITHUB_TOKEN", c)
+	}
+	if c := credentialFor("registry.example.com"); c.Password != "" {
+		t.Fatalf("sent GITHUB_TOKEN to another registry: %+v", c)
+	}
+}

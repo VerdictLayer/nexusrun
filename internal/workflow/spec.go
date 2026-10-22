@@ -16,6 +16,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -372,6 +373,15 @@ func (s *Spec) validateState() diagnostics {
 	}
 	if s.SharedState.Backend == StateMemory && s.SharedState.Path != "" {
 		ds.add("shared_state.path", nil, "shared_state.path is set but the memory backend never writes a file")
+	}
+	// The bus appends to this file, and a workflow pulled from a registry is
+	// someone else's file: an absolute or escaping path would let it create
+	// or append to any file the user can write.
+	if p := s.SharedState.Path; p != "" {
+		clean := filepath.Clean(filepath.FromSlash(p))
+		if filepath.IsAbs(clean) || strings.HasPrefix(p, "/") || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			ds.add("shared_state.path", nil, "shared_state.path must be a relative path inside the workflow's folder, got %q", p)
+		}
 	}
 	switch s.SharedState.Encryption {
 	case "", EncryptionAESGCM:

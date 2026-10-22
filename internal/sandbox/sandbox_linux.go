@@ -131,10 +131,17 @@ func Apply(p Policy) error {
 	}
 
 	// BestEffort keeps this working on kernels with older Landlock ABIs
-	// rather than failing closed on the whole feature.
-	cfg := landlock.V5.BestEffort()
+	// rather than failing closed on the whole feature. From ABI 9 it also
+	// refuses connecting to UNIX sockets that were created outside the
+	// sandbox, which the seccomp filter below enforces on every kernel.
+	cfg := landlock.V9.BestEffort()
 	if err := cfg.RestrictPaths(rules...); err != nil {
 		return fmt.Errorf("apply filesystem policy: %w", err)
+	}
+	// Abstract UNIX sockets and signals to processes outside the sandbox
+	// (ABI 6 and newer).
+	if err := cfg.RestrictScoped(); err != nil {
+		return fmt.Errorf("apply IPC policy: %w", err)
 	}
 
 	if !p.AllowNetwork {
@@ -142,12 +149,12 @@ func Apply(p Policy) error {
 		// with Landlock ABI 4+. Older kernels ignore this (BestEffort), and
 		// Landlock never covers UDP, so the seccomp filter below is what
 		// actually guarantees there is no network. It fails closed.
-		if err := landlock.V5.BestEffort().RestrictNet(); err != nil {
+		if err := cfg.RestrictNet(); err != nil {
 			return fmt.Errorf("apply network policy: %w", err)
 		}
-		if err := denyNetwork(); err != nil {
-			return fmt.Errorf("apply network policy: %w", err)
-		}
+	}
+	if err := restrictSockets(p.AllowNetwork); err != nil {
+		return fmt.Errorf("apply socket policy: %w", err)
 	}
 	return nil
 }

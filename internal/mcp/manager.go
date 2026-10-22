@@ -191,7 +191,12 @@ func serverCommand(ctx context.Context, name string, src Source, srv manifest.MC
 		env = append(env, "LANG="+lang)
 	}
 
-	if !opts.NoSandbox && opts.SelfExe != "" {
+	if !opts.NoSandbox {
+		// Without the helper the server would start unconfined, which the
+		// unit's author and the user never agreed to.
+		if opts.SelfExe == "" {
+			return nil, fmt.Errorf("mcp_servers.%s: internal error: sandbox helper path not set", name)
+		}
 		// The same helper the script runner uses: it applies the Landlock
 		// policy to itself and then becomes the server, so confinement is
 		// inherited and cannot be dropped.

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -160,6 +161,35 @@ func Run(ctx context.Context, m *manifest.Manifest, opts Options) (*Result, erro
 		return res, err
 	}
 	return res, nil
+}
+
+// CheckModelFile reports whether path is a model file that may be granted to
+// a sandboxed script. A unit names its own model, and a local path could name
+// any file the user can read, such as a private key, which the grant would
+// then hand to a unit that never declared the storage capability. Only a GGUF
+// file (by its magic number) or an .onnx file passes; a unit cannot rename the
+// user's files to look like either.
+func CheckModelFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("model %s is not a regular file", path)
+	}
+	if strings.EqualFold(filepath.Ext(path), ".onnx") {
+		return nil
+	}
+	magic := make([]byte, 4)
+	if _, err := io.ReadFull(f, magic); err != nil || string(magic) != "GGUF" {
+		return fmt.Errorf("model %s is not a GGUF or ONNX file", path)
+	}
+	return nil
 }
 
 // interpreterFor picks how to execute a script based on its extension,

@@ -394,7 +394,7 @@ func detachWorkflow(s *store.Store, spec *workflow.Spec, file, input string, max
 	cmd.Stdin = nil
 
 	logPath := filepath.Join(s.LogsDir(), "workflow-"+spec.Name+".log")
-	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

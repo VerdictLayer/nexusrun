@@ -256,6 +256,13 @@ func newRunCmd() *cobra.Command {
 					if mp, ok := sealed[m.Models[0].ID]; ok {
 						modelPath = mp
 					} else if resolved, rerr := s.Resolve(m.Models[0].Source, m.Models[0].SHA256, nil); rerr == nil {
+						// A local or borrowed file is granted to the sandbox
+						// only if it really is a model.
+						if resolved.Shared {
+							if cerr := runner.CheckModelFile(resolved.Path); cerr != nil {
+								return cerr
+							}
+						}
 						modelPath = resolved.Path
 					}
 				}
@@ -546,7 +553,7 @@ func newRunCmd() *cobra.Command {
 				logf("warning: could not save run record: %v", err)
 			}
 			if res != nil {
-				_ = os.WriteFile(s.LogPath(runID), []byte(res.Text), 0o644)
+				_ = os.WriteFile(s.LogPath(runID), []byte(res.Text), 0o600)
 			}
 			if runErr != nil {
 				return runErr

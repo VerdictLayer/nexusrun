@@ -179,10 +179,15 @@ async function load() {
         <td>${size(x.size)}</td>
         <td>${x.models}</td>
         <td class="mono muted">${esc(x.prefer)}</td>
-        <td><button class="secondary" onclick="showInstall('${esc(x.ref)}').catch(showInstallError)">Install</button></td>
+        <td><button class="secondary" data-install="${esc(x.ref)}">Install</button></td>
       </tr>`;
     }
     document.querySelector("#units tbody").innerHTML = u;
+    // The ref travels as data, never as script: a ref comes from an imported
+    // unit, and an inline handler would decode &#39; back into a quote.
+    for (const b of document.querySelectorAll("#units [data-install]")) {
+      b.addEventListener("click", () => showInstall(b.dataset.install).catch(showInstallError));
+    }
   }
 
   if (!runs.length) {
