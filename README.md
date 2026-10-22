@@ -382,6 +382,7 @@ instead of silently doing nothing.
 | `nexus list` / `inspect` | Show local units, layers, and manifests |
 | `nexus login` / `logout` / `whoami` | Sign in to NexusRun Cloud from any terminal (device flow) |
 | `nexus usage` | Your Cloud plan, storage and monthly bandwidth |
+| `nexus fleet` | Host enrollment, test-gated CPU canary releases, local execution and rollback |
 | `nexus push` / `pull` | Any OCI registry — ghcr.io, Docker Hub, ECR, Harbor, zot |
 | `nexus export` / `import` | Portable `.nx` file for sneakernet and air-gap |
 | `nexus doctor` | Hardware vs. backend capability |
@@ -393,8 +394,8 @@ instead of silently doing nothing.
 | `nexus models` | Local models, including reusable Ollama ones |
 | `nexus logs` | Run history and captured output |
 | `nexus serve` | Web console + warm-model daemon |
-
 | `nexus studio` | Build a workflow on a canvas: drag agents, models and links |
+
 Running a directory directly (`nexus run ./my-agent`) skips packaging — the
 fast inner loop while developing.
 
@@ -404,13 +405,14 @@ fast inner loop while developing.
 |---|---|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | **Start here.** Install Ollama, download a small model, create the YAML, and run your first helper |
 | [docs/OFFLINE_DEMO.md](docs/OFFLINE_DEMO.md) | Seal the same helper and carry a complete Linux deployment bundle to an offline computer |
+| [docs/FLEET.md](docs/FLEET.md) | Enroll Linux CPU hosts, release an agent through canaries, and keep execution local |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, repo map, how to add a backend or model source, testing |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Every command and flag, the manifest schema, env vars, on-disk and OCI layout |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the system is shaped this way — the design decisions and their trade-offs |
 | [docs/COMPOSE.md](docs/COMPOSE.md) | Multi-agent workflows: the graph, routing conditions, transforms, and the shared state bus |
+| [docs/STUDIO.md](docs/STUDIO.md) | Build a workflow on a canvas with your local models |
 | [docs/AUTOMODEL.md](docs/AUTOMODEL.md) | Declaring what kind of model a unit needs and letting each machine measure which one clears the bar |
 | [docs/TOOLS.md](docs/TOOLS.md) | Declaring tools, the agent loop that executes them, and per-tool capability narrowing |
-| [docs/STUDIO.md](docs/STUDIO.md) | Build a workflow on a canvas with your local models |
 | [docs/MCP.md](docs/MCP.md) | Declaring MCP servers as versioned, sandboxed dependencies of a unit |
 | [docs/SECRETS.md](docs/SECRETS.md) | Keeping credentials out of the artifact: the encrypted store, device scoping, rotation, audit |
 | [docs/CHECKPOINT.md](docs/CHECKPOINT.md) | Sessions an agent remembers, and moving that state to another machine |

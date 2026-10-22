@@ -37,6 +37,11 @@ func Open() (*Store, error) {
 		}
 		root = filepath.Join(home, ".nexusrun")
 	}
+	return OpenRoot(root)
+}
+
+// OpenRoot opens an isolated store without changing process-wide environment.
+func OpenRoot(root string) (*Store, error) {
 	s := &Store{Root: root}
 	// Run logs hold what the models said, so the home is private to this
 	// user. MkdirAll leaves an existing directory's mode alone.

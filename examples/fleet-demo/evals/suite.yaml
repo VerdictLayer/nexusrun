@@ -1,0 +1,14 @@
+apiVersion: nexusrun.dev/v1
+kind: EvalSuite
+name: fleet-smoke
+temperature: 0
+max_tokens: 32
+cases:
+  - name: arithmetic
+    prompt: What is 2 + 2? Answer with just the digit.
+    expect:
+      contains: ["4"]
+  - name: greeting
+    prompt: Say exactly hello.
+    expect:
+      contains: ["hello"]

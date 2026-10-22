@@ -204,6 +204,33 @@ storage, and stops early with a clear message if the account is read-only.
 #### `nexus pull <registry-ref>`
 Pull a unit into the local store.
 
+#### `nexus fleet`
+
+Outbound-only host enrollment and digest-pinned, test-gated rollouts through
+NexusRun Cloud. Hosts execute sealed single-model chat agents on Linux amd64
+CPU using an exact preimported managed runtime. See [FLEET.md](FLEET.md) for
+the complete walkthrough and offline semantics.
+
+| Subcommand | Purpose |
+|---|---|
+| `join <registry/org/repo> --name <label> --channel production` | Enroll this NexusRun home for one assignment |
+| `sync --timeout 10m` | Download, verify, evaluate, and activate an authorized candidate |
+| `watch --interval 30s --timeout 10m` | Repeat synchronization until interrupted |
+| `run -p <prompt> [-n 256]` | Invoke the active local snapshot without contacting Cloud |
+| `status` | Read local assignment, active/previous releases, and pending-report state |
+| `list <registry/org>` | Show Cloud's hosts, recent releases and aggregate reports |
+| `release <registry/org/repo> --digest sha256:... --runtime <id> --canaries 1 --channel production` | Create a fixed-canary rollout |
+| `rollback <registry/org/repo> --canaries 1 --channel production` | Start a tested rollout of the earlier active artifact/runtime |
+| `pause <registry/org> <release-id>` | Stop further activation for that rollout |
+| `remove <registry/org> <host-id>` | Revoke host check-in and registry access |
+
+All acceptance tests must pass, with at least one test. Non-canary hosts wait
+until every selected canary reports activation. A failure pauses further
+activation; existing local snapshots remain available. New releases affect
+subsequent `fleet run` invocations, not in-flight work. Host credentials stay
+in private local enrollment state; admin operations use the existing registry
+login. `--timeout` accepts 1s–1h; watch intervals must be at least 5s.
+
 #### `nexus export <ref> <file.nx>` / `nexus import <file.nx>`
 Write and read a portable OCI image-layout tarball, for sneakernet and
 air-gapped transfer. `.nx` is a container for the same OCI content, not a
@@ -306,6 +333,19 @@ and a verdict per device: `fits` (leaves headroom), `tight`, `too_large`, or
 memory (weights, key/value cache and runtime overhead) and says nothing about
 speed. The `ref` of each model is what goes in `model:` or `source:`.
 
+#### `nexus studio [dir]`
+Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
+| `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
+| `--app` | `false` | Open in its own window using Chrome, Edge, Chromium or Brave |
+| `--workspace` | none | A folder of workflows, instead of one workflow |
+| `--quit-when-closed` | `false` | Stop shortly after the page is closed |
+| `--install-launcher` / `--remove-launcher` | `false` | Add or remove the application menu entry (Linux) and exit |
+| `--no-browser` | `false` | Print the link instead of opening anything |
+
 #### `nexus logs [run-id]`
 Show run history, or one run's captured output. `--json` available.
 
@@ -333,38 +373,6 @@ starts, stored in `daemon.token` (mode 0600) in the NexusRun home, and printed
 once in the console link (`http://127.0.0.1:7717/#token=…`), which the browser
 keeps for that tab only. It also protects itself from web pages open in your
 browser, which can otherwise reach loopback services:
-#### `nexus studio [dir]`
-Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
-| `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
-| `--app` | `false` | Open in its own window using Chrome, Edge, Chromium or Brave |
-| `--workspace` | none | A folder of workflows, instead of one workflow |
-| `--quit-when-closed` | `false` | Stop shortly after the page is closed |
-| `--install-launcher` / `--remove-launcher` | `false` | Add or remove the application menu entry (Linux) and exit |
-| `--no-browser` | `false` | Print the link instead of opening anything |
-
-#### `nexus studio [dir]`
-Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
-| `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
-| `--app` | `false` | Open in its own window using Chrome, Edge, Chromium or Brave |
-| `--no-browser` | `false` | Print the link instead of opening anything |
-
-#### `nexus studio [dir]`
-Open the workflow editor on a folder. See [STUDIO.md](STUDIO.md).
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--addr` | `127.0.0.1:7718` | Listen address (loopback only) |
-| `--model-dir` | none | Also search this folder for `.gguf` models (repeatable) |
-| `--no-browser` | `false` | Print the link instead of opening a browser |
-
 
 - The `Host` header must name the server's own loopback address and port, so a
   site that re-points its DNS name at `127.0.0.1` is refused.

@@ -1,6 +1,6 @@
 # Website walkthroughs
 
-The GitHub Markdown files are the source for both website guides. To render
+The GitHub Markdown files are the source for the website guides. To render
 standalone pages with the site's colors, navigation, and copy buttons:
 
 ```sh
@@ -14,11 +14,11 @@ also includes the website's Google Tag Manager container, `GTM-NVCFBTDC`,
 with its script in the head and noscript iframe immediately after the body tag.
 The same head includes the Google Analytics tag for `G-31LHFJYC2Y`.
 
-Copy `get-started.html` and `offline-demo.html` into the website source repo.
-Serve them at `/get-started` and `/offline-demo`, with content type
+Copy `get-started.html`, `offline-demo.html`, and `fleet-guide.html` into the website source repo.
+Serve them at `/get-started`, `/offline-demo`, and `/fleet-guide`, with content type
 `text/html; charset=utf-8`, matching the existing extensionless website routes.
-Include both files in the site's deployment script and cache invalidation.
+Include all three files in the site's deployment script and cache invalidation.
 Link the homepage's Start section to `/get-started`.
 
-Regenerate both pages whenever either walkthrough changes. Check mobile
+Regenerate the pages whenever a walkthrough changes. Check mobile
 widths, both color schemes, YAML copying, and internal links before publishing.

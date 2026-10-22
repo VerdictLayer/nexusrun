@@ -37,6 +37,7 @@ func TestCommandTreeBuilds(t *testing.T) {
 	// quietly drop one.
 	for _, path := range []string{
 		"install",
+		"fleet join", "fleet sync", "fleet watch", "fleet run", "fleet status", "fleet list", "fleet release", "fleet rollback", "fleet pause", "fleet remove",
 		"compose validate", "compose up", "compose down", "compose logs",
 		"compose build", "compose push", "compose pull", "compose init", "compose list",
 		"bench cache show", "bench cache clear", "bench export",

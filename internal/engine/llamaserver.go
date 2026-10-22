@@ -31,10 +31,17 @@ import (
 // requests skip that cost entirely. It also applies the model's chat
 // template server-side via the OpenAI-compatible endpoint.
 type LlamaServer struct {
-	bin string
+	bin       string
+	libraries []string
+	private   bool
 
 	mu        sync.Mutex
 	instances map[string]*serverInstance
+}
+
+// NewPinnedServer uses the explicitly verified runtime for every subprocess.
+func NewPinnedServer(binary string, libraries []string) *LlamaServer {
+	return &LlamaServer{bin: binary, libraries: append([]string(nil), libraries...), private: true}
 }
 
 // serverInstance is one running llama-server process holding one model.
@@ -130,7 +137,7 @@ func (l *LlamaServer) Probe() Capability {
 	c.SupportsTools = true
 	c.Devices = []string{hardware.ClassCPU}
 
-	if out, err := runWithLibPath(bin, "--version").CombinedOutput(); err == nil {
+	if out, err := runWithLibraries(bin, l.libraries, "--version").CombinedOutput(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.HasPrefix(line, "version:") {
 				c.Version = strings.TrimSpace(strings.TrimPrefix(line, "version:"))
@@ -138,7 +145,7 @@ func (l *LlamaServer) Probe() Capability {
 			}
 		}
 	}
-	if devices := probeLlamaDevices(bin); len(devices) > 0 {
+	if devices := probeLlamaDevices(bin, l.libraries...); len(devices) > 0 {
 		c.Devices = append([]string{hardware.ClassGPU}, c.Devices...)
 		c.Detail = "GPU offload available; keeps models warm between runs"
 	} else {
@@ -340,9 +347,15 @@ func (l *LlamaServer) acquire(ctx context.Context, modelPath, device string, ctx
 		return nil, err
 	}
 	apiKey := hex.EncodeToString(secret)
-	cmd := runWithLibPath(bin, args...)
+	cmd := runWithLibraries(bin, l.libraries, args...)
 	cmd.Env = append(cmd.Env, "LLAMA_API_KEY="+apiKey)
-	logFile, _ := os.CreateTemp("", "nexus-llama-server-*.log")
+	var logFile *os.File
+	if l.private {
+		// Fleet never persists backend output containing prompts or host paths.
+		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	} else {
+		logFile, _ = os.CreateTemp("", "nexus-llama-server-*.log")
+	}
 	if logFile != nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
@@ -460,8 +473,15 @@ func (l *LlamaServer) Warm() []string {
 // Prebuilt llama.cpp releases ship libggml*.so next to the binary rather
 // than installing them system-wide.
 func runWithLibPath(bin string, args ...string) *exec.Cmd {
+	return runWithLibraries(bin, nil, args...)
+}
+
+func runWithLibraries(bin string, libraries []string, args ...string) *exec.Cmd {
 	cmd := exec.Command(bin, args...)
 	dir := filepath.Dir(bin)
+	if len(libraries) > 0 {
+		dir = strings.Join(append([]string{dir}, libraries...), string(os.PathListSeparator))
+	}
 	env := os.Environ()
 	existing := os.Getenv("LD_LIBRARY_PATH")
 	if existing != "" {
@@ -473,8 +493,8 @@ func runWithLibPath(bin string, args ...string) *exec.Cmd {
 
 // probeLlamaDevices returns accelerator classes a llama.cpp binary was
 // compiled to drive, by parsing --list-devices.
-func probeLlamaDevices(bin string) []string {
-	out, err := runWithLibPath(bin, "--list-devices").CombinedOutput()
+func probeLlamaDevices(bin string, libraries ...string) []string {
+	out, err := runWithLibraries(bin, libraries, "--list-devices").CombinedOutput()
 	if err != nil {
 		return nil
 	}

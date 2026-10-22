@@ -16,7 +16,7 @@ import markdown
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = {"QUICKSTART.md": "get-started", "OFFLINE_DEMO.md": "offline-demo"}
+PAGES = {"QUICKSTART.md": "get-started", "OFFLINE_DEMO.md": "offline-demo", "FLEET.md": "fleet-guide"}
 
 
 class WebsiteLinks(HTMLParser):
