@@ -2,10 +2,12 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 )
 
 // Protect puts the standard loopback protections in front of h: the Host and
@@ -22,6 +24,22 @@ func Protect(h http.Handler, listenAddr, token string) http.Handler {
 // token.
 func ProtectExcept(h http.Handler, listenAddr, token string, public ...string) http.Handler {
 	return guard(requireToken(h, token, public...), listenAddr)
+}
+
+// ProtectAll is Protect for a server whose every route is an API: the token is
+// required on every path, not only under /api/. The fleet endpoint uses it,
+// because OpenAI-style clients call /v1/... paths.
+func ProtectAll(h http.Handler, listenAddr, token string) http.Handler {
+	want := []byte(token)
+	return guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="nexus"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	}), listenAddr)
 }
 
 // NewSessionToken returns a random token that lives only in memory, for servers

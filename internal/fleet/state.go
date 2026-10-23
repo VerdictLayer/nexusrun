@@ -17,16 +17,20 @@ type Enrollment struct {
 }
 
 type Activation struct {
-	Release Release `json:"release"`
-	Passed  int     `json:"passed"`
-	Total   int     `json:"total"`
+	Release Release       `json:"release"`
+	Passed  int           `json:"passed"`
+	Total   int           `json:"total"`
+	Suite   *SuiteOutcome `json:"suite,omitempty"`
 }
 
 type State struct {
 	Active   *Activation `json:"active"`
 	Previous *Activation `json:"previous"`
 	Pending  *Evaluation `json:"pending,omitempty"`
-	LastCode string      `json:"lastCode,omitempty"`
+	// Proof is Pending's signed statement, kept with it so a report retried
+	// after a lost connection carries the signature made when it was decided.
+	Proof    *Attestation `json:"proof,omitempty"`
+	LastCode string       `json:"lastCode,omitempty"`
 }
 
 func Root(home string) string { return filepath.Join(home, "fleet") }

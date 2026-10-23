@@ -207,9 +207,10 @@ Pull a unit into the local store.
 #### `nexus fleet`
 
 Outbound-only host enrollment and digest-pinned, test-gated rollouts through
-NexusRun Cloud. Hosts execute sealed single-model chat agents on Linux amd64
-CPU using an exact preimported managed runtime. See [FLEET.md](FLEET.md) for
-the complete walkthrough and offline semantics.
+NexusRun Cloud. Hosts execute sealed single-model chat agents, with script
+tools and secrets, on Linux amd64 CPU using an exact preimported managed
+runtime. See [FLEET.md](FLEET.md) for the complete walkthrough and offline
+semantics.
 
 | Subcommand | Purpose |
 |---|---|
@@ -217,12 +218,16 @@ the complete walkthrough and offline semantics.
 | `sync --timeout 10m` | Download, verify, evaluate, and activate an authorized candidate |
 | `watch --interval 30s --timeout 10m` | Repeat synchronization until interrupted |
 | `run -p <prompt> [-n 256]` | Invoke the active local snapshot without contacting Cloud |
+| `serve [--addr 127.0.0.1:7720] [--interval 30s] [--timeout 10m]` | Synchronize like `watch` and answer local applications at `/v1/chat/completions` and `/v1/models` (OpenAI-compatible) |
+| `key` | Print the API key for `serve` |
 | `status` | Read local assignment, active/previous releases, and pending-report state |
 | `list <registry/org>` | Show Cloud's hosts, recent releases and aggregate reports |
 | `release <registry/org/repo> --digest sha256:... --runtime <id> --canaries 1 --channel production` | Create a fixed-canary rollout |
 | `rollback <registry/org/repo> --canaries 1 --channel production` | Start a tested rollout of the earlier active artifact/runtime |
 | `pause <registry/org> <release-id>` | Stop further activation for that rollout |
 | `remove <registry/org> <host-id>` | Revoke host check-in and registry access |
+| `record <registry/org> <release-id> [-o file]` | Download a release's signed host results and verify them |
+| `verify <record.json>` | Verify a saved record offline; exits non-zero if any report fails |
 
 All acceptance tests must pass, with at least one test. Non-canary hosts wait
 until every selected canary reports activation. A failure pauses further
@@ -230,6 +235,10 @@ activation; existing local snapshots remain available. New releases affect
 subsequent `fleet run` invocations, not in-flight work. Host credentials stay
 in private local enrollment state; admin operations use the existing registry
 login. `--timeout` accepts 1s–1h; watch intervals must be at least 5s.
+`join` creates the host's Ed25519 signing key; `status` shows its fingerprint
+as `hostKey`. While `serve` runs it is the only fleet operation for that home.
+Failure codes are `artifact`, `runtime`, `secrets`, `evaluation`, `storage`
+and `cancelled`; the full reason is printed on the host only.
 
 #### `nexus export <ref> <file.nx>` / `nexus import <file.nx>`
 Write and read a portable OCI image-layout tarball, for sneakernet and

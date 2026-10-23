@@ -465,3 +465,28 @@ func TestReportHeaderSurvivesAnUnusableFirstTarget(t *testing.T) {
 		t.Errorf("Best() = %+v, want the working backend", best)
 	}
 }
+
+// A unit with tools is scored on what its agent loop answers, so the hook
+// replaces the single generation and is handed the backend it would use.
+func TestGenerateHookAnswersEachCase(t *testing.T) {
+	b := cpuStub("stub", "the bare model never finds it")
+	opts := baseOpts(suiteOf(passCase("uses-tool", "FROM_TOOL")), b)
+	var got engine.Backend
+	opts.Generate = func(_ context.Context, backend engine.Backend, req engine.Request) (*engine.Result, error) {
+		got = backend
+		if req.Prompt != "prompt for uses-tool" {
+			t.Errorf("hook got prompt %q", req.Prompt)
+		}
+		return &engine.Result{Text: "answer FROM_TOOL"}, nil
+	}
+	rep, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != b || b.calls != 0 {
+		t.Fatalf("hook was not used in place of the backend (backend calls %d)", b.calls)
+	}
+	if tr := rep.Targets[0]; tr.Passed != 1 || tr.Total != 1 {
+		t.Fatalf("passed %d/%d, want 1/1", tr.Passed, tr.Total)
+	}
+}

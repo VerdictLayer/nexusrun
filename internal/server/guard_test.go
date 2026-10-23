@@ -143,3 +143,36 @@ func TestServeRefusesNonLoopbackBind(t *testing.T) {
 		}
 	}
 }
+
+func TestProtectAllRequiresTheTokenOnEveryPath(t *testing.T) {
+	h := ProtectAll(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }), "127.0.0.1:7720", "secret")
+	for _, tc := range []struct {
+		path, auth string
+		want       int
+	}{
+		{"/v1/models", "", http.StatusUnauthorized},
+		{"/v1/models", "Bearer wrong", http.StatusUnauthorized},
+		{"/anything", "", http.StatusUnauthorized},
+		{"/v1/models", "Bearer secret", http.StatusNoContent},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Host = "127.0.0.1:7720"
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s with %q: got %d, want %d", tc.path, tc.auth, rec.Code, tc.want)
+		}
+	}
+	// The Host guard still applies in front of the token.
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Host = "evil.example:7720"
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("rebound Host: got %d, want 403", rec.Code)
+	}
+}

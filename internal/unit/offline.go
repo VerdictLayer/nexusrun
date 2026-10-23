@@ -15,16 +15,34 @@ import (
 // without contacting a registry or relying on host programs. Secrets are the
 // deliberate exception: declarations travel, values must never enter a unit.
 func ValidateOffline(ctx context.Context, s *store.Store, ref, target string) error {
-	return validateOffline(ctx, s, ref, target, true)
+	return validateOffline(ctx, s, ref, target, checkBundle)
 }
 
 // ValidateOfflineAgent checks the portable agent portion of a deployment
 // bundle. The caller supplies and independently verifies the runtime package.
 func ValidateOfflineAgent(ctx context.Context, s *store.Store, ref, target string) error {
-	return validateOffline(ctx, s, ref, target, false)
+	return validateOffline(ctx, s, ref, target, checkBundleAgent)
 }
 
-func validateOffline(ctx context.Context, s *store.Store, ref, target string, requireEmbeddedRuntime bool) error {
+// ValidateFleetAgent checks a fleet release. Unlike a bundle, a fleet host
+// runs the release's acceptance tests itself before activating it, so a tool
+// may use a program the host provides, such as /bin/sh or python3: a host
+// without it fails its own tests and keeps its working release. Commands
+// inside the unit must still be present and stay inside it.
+func ValidateFleetAgent(ctx context.Context, s *store.Store, ref, target string) error {
+	return validateOffline(ctx, s, ref, target, checkFleet)
+}
+
+type offlineCheck int
+
+const (
+	checkBundle offlineCheck = iota
+	checkBundleAgent
+	checkFleet
+)
+
+func validateOffline(ctx context.Context, s *store.Store, ref, target string, mode offlineCheck) error {
+	requireEmbeddedRuntime := mode == checkBundle
 	m, om, err := Resolve(ctx, s, ref)
 	if err != nil {
 		return err
@@ -93,24 +111,11 @@ func validateOffline(ctx context.Context, s *store.Store, ref, target string, re
 		if m.Entrypoint.Type != "chat" {
 			problems = append(problems, "deployment bundles support chat entrypoints")
 		}
-		if len(m.Tools) > 0 {
+		if len(m.Tools) > 0 && mode != checkFleet {
 			problems = append(problems, "deployment bundles support chat agents without packaged tools; remove the tools from this unit to bundle it")
 		}
 	}
-	checkCommand := func(label string, argv []string) {
-		if len(argv) == 0 {
-			return
-		}
-		cmd := argv[0]
-		switch strings.ToLower(filepath.Ext(cmd)) {
-		case ".py", ".js", ".mjs", ".sh":
-			problems = append(problems, fmt.Sprintf("%s %q needs a host interpreter; bundle a target-native executable", label, cmd))
-			return
-		}
-		if filepath.IsAbs(cmd) || (!strings.Contains(cmd, "/") && !strings.Contains(cmd, `\`)) {
-			problems = append(problems, fmt.Sprintf("%s uses host command %q; use a unit-relative bundled executable", label, cmd))
-			return
-		}
+	inside := func(label, cmd string) {
 		clean := filepath.Clean(filepath.FromSlash(cmd))
 		if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 			problems = append(problems, fmt.Sprintf("%s command escapes the unit", label))
@@ -119,6 +124,37 @@ func validateOffline(ctx context.Context, s *store.Store, ref, target string, re
 		if info, e := os.Stat(filepath.Join(tmp, clean)); e != nil || info.IsDir() {
 			problems = append(problems, fmt.Sprintf("%s executable %q is not bundled", label, cmd))
 		}
+	}
+	hostProgram := func(cmd string) bool {
+		return filepath.IsAbs(cmd) || (!strings.Contains(cmd, "/") && !strings.Contains(cmd, `\`))
+	}
+	checkCommand := func(label string, argv []string) {
+		if len(argv) == 0 {
+			return
+		}
+		cmd := argv[0]
+		if mode == checkFleet {
+			// A host program such as /bin/sh or python3 is exercised by the
+			// host's acceptance tests; the unit's own file it runs must exist.
+			if hostProgram(cmd) {
+				if len(argv) < 2 || hostProgram(argv[1]) {
+					return
+				}
+				cmd = argv[1]
+			}
+			inside(label, cmd)
+			return
+		}
+		switch strings.ToLower(filepath.Ext(cmd)) {
+		case ".py", ".js", ".mjs", ".sh":
+			problems = append(problems, fmt.Sprintf("%s %q needs a host interpreter; bundle a target-native executable", label, cmd))
+			return
+		}
+		if hostProgram(cmd) {
+			problems = append(problems, fmt.Sprintf("%s uses host command %q; use a unit-relative bundled executable", label, cmd))
+			return
+		}
+		inside(label, cmd)
 	}
 	if m.Entrypoint.Type == "script" {
 		checkCommand("entrypoint", []string{m.Entrypoint.Script})

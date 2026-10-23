@@ -9,7 +9,20 @@ import (
 type Control interface {
 	Checkin(context.Context, Checkin) (Desired, error)
 }
-type Prepare func(context.Context, Enrollment, Release) (passed, total int, code string)
+
+// Outcome is what testing one candidate found. Code is "ok" only when every
+// acceptance test passed.
+type Outcome struct {
+	Passed int
+	Total  int
+	Code   string
+	Suite  *SuiteOutcome
+	// Detail says why a candidate failed. It is shown on this host only and
+	// never reported: it can name local paths and test output.
+	Detail string
+}
+
+type Prepare func(context.Context, Enrollment, Release) Outcome
 type Result struct {
 	Status    string `json:"status"`
 	ReleaseID string `json:"releaseID,omitempty"`
@@ -24,6 +37,11 @@ func Sync(ctx context.Context, home string, hw Hardware, control Control, prepar
 		return Result{}, err
 	}
 	defer unlock()
+	return syncLocked(ctx, home, hw, control, prepare)
+}
+
+// syncLocked is Sync for a caller that already holds the fleet lock.
+func syncLocked(ctx context.Context, home string, hw Hardware, control Control, prepare Prepare) (Result, error) {
 	e, err := LoadEnrollment(home)
 	if err != nil {
 		return Result{}, err
@@ -38,16 +56,32 @@ func Sync(ctx context.Context, home string, hw Hardware, control Control, prepar
 		}
 		return &s.Active.Release.ID
 	}
-	d, err := control.Checkin(ctx, Checkin{hw, current(), s.Pending})
+	// pending records a decision and its signed statement together, before
+	// it is reported, so a lost connection cannot separate them.
+	pending := func(r Release, ev Evaluation, suite *SuiteOutcome) error {
+		proof, err := attest(home, e, r, ev, suite)
+		if err != nil {
+			return err
+		}
+		s.Pending, s.Proof = &ev, proof
+		return SaveState(home, s)
+	}
+	clear := func() error {
+		s.Pending, s.Proof = nil, nil
+		return SaveState(home, s)
+	}
+	report := func() (Desired, error) {
+		return control.Checkin(ctx, Checkin{hw, current(), s.Pending, s.Proof})
+	}
+	d, err := report()
 	var conflict *HTTPError
 	if errors.As(err, &conflict) && conflict.Status == 409 && s.Pending != nil {
-		d, err = control.Checkin(ctx, Checkin{hw, current(), nil})
+		d, err = control.Checkin(ctx, Checkin{hw, current(), nil, nil})
 	}
 	if err != nil {
 		return Result{Status: "offline"}, err
 	}
-	s.Pending = nil
-	if err = SaveState(home, s); err != nil {
+	if err = clear(); err != nil {
 		return Result{}, err
 	}
 	if d.Release == nil {
@@ -67,41 +101,40 @@ func Sync(ctx context.Context, home string, hw Hardware, control Control, prepar
 	if !d.Activate || r.Status == "paused" {
 		return Result{Status: r.Status, ReleaseID: r.ID}, nil
 	}
-	passed, total, code := prepare(ctx, e, r)
+	out := prepare(ctx, e, r)
 	if ctx.Err() != nil {
-		code = "cancelled"
+		out.Code = "cancelled"
 	}
-	if code != "ok" || total == 0 || passed != total {
-		if code == "ok" {
-			code = "evaluation"
+	if out.Code != "ok" || out.Total == 0 || out.Passed != out.Total {
+		if out.Code == "ok" {
+			out.Code = "evaluation"
 		}
-		s.LastCode = code
-		s.Pending = &Evaluation{r.ID, "rejected", passed, total, code}
-		if err = SaveState(home, s); err != nil {
+		s.LastCode = out.Code
+		if err = pending(r, Evaluation{r.ID, "rejected", out.Passed, out.Total, out.Code}, out.Suite); err != nil {
 			return Result{}, err
 		}
-		_, reportErr := control.Checkin(ctx, Checkin{hw, current(), s.Pending})
-		if reportErr == nil {
-			s.Pending = nil
-			if err = SaveState(home, s); err != nil {
+		if _, reportErr := report(); reportErr == nil {
+			if err = clear(); err != nil {
 				return Result{}, err
 			}
 		}
-		return Result{Status: "rejected", ReleaseID: r.ID, Code: code}, fmt.Errorf("candidate release rejected (%s); active release preserved", code)
+		why := out.Code
+		if out.Detail != "" {
+			why += ": " + out.Detail
+		}
+		return Result{Status: "rejected", ReleaseID: r.ID, Code: out.Code}, fmt.Errorf("candidate release rejected (%s); active release preserved", why)
 	}
-	s.Pending = &Evaluation{r.ID, "prepared", passed, total, "ok"}
-	if err = SaveState(home, s); err != nil {
+	if err = pending(r, Evaluation{r.ID, "prepared", out.Passed, out.Total, "ok"}, out.Suite); err != nil {
 		return Result{}, err
 	}
 	// Reauthorize after testing: a failure on another canary, a pause, or a
 	// superseding release must not be ignored while this host was evaluating.
-	d, err = control.Checkin(ctx, Checkin{hw, current(), s.Pending})
+	d, err = report()
 	if err != nil {
 		return Result{Status: "waiting", ReleaseID: r.ID}, err
 	}
 	if !d.Activate || d.Release == nil || d.Release.ID != r.ID || d.Release.Status == "paused" || d.Release.Digest != r.Digest || d.Release.RuntimeID != r.RuntimeID || d.Release.Repository != r.Repository || d.Release.Channel != r.Channel {
-		s.Pending = nil
-		if err = SaveState(home, s); err != nil {
+		if err = clear(); err != nil {
 			return Result{}, err
 		}
 		return Result{Status: "waiting", ReleaseID: r.ID}, nil
@@ -110,18 +143,15 @@ func Sync(ctx context.Context, home string, hw Hardware, control Control, prepar
 		return Result{}, ctx.Err()
 	}
 	s.Previous = s.Active
-	s.Active = &Activation{r, passed, total}
+	s.Active = &Activation{r, out.Passed, out.Total, out.Suite}
 	s.LastCode = ""
-	s.Pending = &Evaluation{r.ID, "active", passed, total, "ok"}
-	if err = SaveState(home, s); err != nil {
+	if err = pending(r, Evaluation{r.ID, "active", out.Passed, out.Total, "ok"}, out.Suite); err != nil {
 		return Result{}, err
 	}
-	_, err = control.Checkin(ctx, Checkin{hw, current(), s.Pending})
-	if err != nil {
+	if _, err = report(); err != nil {
 		return Result{Status: "active", ReleaseID: r.ID, Code: "report_pending"}, nil
 	}
-	s.Pending = nil
-	if err = SaveState(home, s); err != nil {
+	if err = clear(); err != nil {
 		return Result{}, err
 	}
 	return Result{Status: "active", ReleaseID: r.ID}, nil

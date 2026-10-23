@@ -455,7 +455,7 @@ func newRunCmd() *cobra.Command {
 				NoSandbox: noSandbox, Env: inj.Env,
 			})
 
-			tools := append(toolDefs(m.Tools), agent.Defs(mcpMgr)...)
+			tools := append(agent.ToolDefs(m.Tools), agent.Defs(mcpMgr)...)
 			if len(tools) > 0 {
 				// The candidate set should make this impossible; assert it
 				// anyway, because the failure it guards against is a unit
@@ -780,21 +780,6 @@ func unitNeedsDirectRun(ctx context.Context, s *store.Store, ref string) bool {
 // the model. Only the parts the model needs to choose a tool cross over —
 // how a tool is executed, and what it is allowed to touch, are the
 // runtime's business and never reach the model.
-func toolDefs(tools []manifest.Tool) []engine.ToolDef {
-	if len(tools) == 0 {
-		return nil
-	}
-	out := make([]engine.ToolDef, 0, len(tools))
-	for _, t := range tools {
-		out = append(out, engine.ToolDef{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.Parameters,
-		})
-	}
-	return out
-}
-
 func toolNames(tools []manifest.Tool) []string {
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {

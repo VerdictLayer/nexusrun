@@ -1,0 +1,39 @@
+apiVersion: nexusrun.dev/v1
+name: order-desk
+version: 0.1.0
+description: Answers order-status questions with a lookup tool that needs an access token
+license: Apache-2.0
+models:
+  - id: main
+    source: ollama:qwen2.5:1.5b
+    context: 4096
+    temperature: 0
+entrypoint:
+  type: chat
+  system_prompt: |
+    You answer questions about customer orders. To find an order's status,
+    call lookup_order with the order number. Never guess a status. Reply in
+    one short sentence.
+tools:
+  - name: lookup_order
+    description: Look up the current status of a customer order by its order number
+    parameters:
+      type: object
+      properties:
+        order:
+          type: string
+          description: The order number, for example 1042
+      required: [order]
+    exec:
+      type: script
+      command: ["/bin/sh", "tools/lookup_order.sh"]
+secrets:
+  - name: ORDERS_TOKEN
+    required: true
+hardware:
+  prefer: [cpu]
+installation:
+  targets:
+    - os: linux
+      arch: amd64
+      device: cpu

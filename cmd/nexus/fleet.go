@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +32,7 @@ func fleetAdmin(repository string) (*fleet.Client, error) {
 
 func newFleetCmd() *cobra.Command {
 	c := &cobra.Command{Use: "fleet", Short: "Enroll hosts and manage test-gated agent releases"}
-	c.AddCommand(newFleetJoinCmd(), newFleetSyncCmd(false), newFleetSyncCmd(true), newFleetRunCmd(), newFleetStatusCmd(), newFleetListCmd(), newFleetReleaseCmd(false), newFleetReleaseCmd(true), newFleetPauseCmd(), newFleetRemoveCmd())
+	c.AddCommand(newFleetJoinCmd(), newFleetSyncCmd(false), newFleetSyncCmd(true), newFleetRunCmd(), newFleetStatusCmd(), newFleetListCmd(), newFleetReleaseCmd(false), newFleetReleaseCmd(true), newFleetPauseCmd(), newFleetRemoveCmd(), newFleetServeCmd(), newFleetKeyCmd(), newFleetRecordCmd(), newFleetVerifyCmd())
 	return c
 }
 
@@ -61,17 +62,25 @@ func newFleetJoinCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		key, err := fleet.NewHostKey()
+		if err != nil {
+			return err
+		}
+		publicKey := fleet.EncodePublicKey(key.Public().(ed25519.PublicKey))
 		var enrolled struct {
 			HostID string `json:"hostID"`
 			Token  string `json:"token"`
 		}
-		if err = client.Admin(cmd.Context(), "POST", "enroll", map[string]any{"name": name, "repository": client.Repository, "channel": channel, "hardware": hw}, &enrolled); err != nil {
+		if err = client.Admin(cmd.Context(), "POST", "enroll", map[string]any{"name": name, "repository": client.Repository, "channel": channel, "hardware": hw, "publicKey": publicKey}, &enrolled); err != nil {
 			return err
+		}
+		if err = fleet.SaveHostKey(s.Root, key); err != nil {
+			return fmt.Errorf("host enrolled but its signing key could not be saved; remove host %s in Cloud before retrying", enrolled.HostID)
 		}
 		if err = fleet.SaveEnrollment(s.Root, fleet.Enrollment{HostID: enrolled.HostID, Name: name, Repository: args[0], Channel: channel, Token: enrolled.Token}); err != nil {
 			return fmt.Errorf("host enrolled but local credentials could not be saved; remove host %s in Cloud before retrying", enrolled.HostID)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Enrolled %s (%s) in %s\nNext: nexus fleet sync\n", name, enrolled.HostID, channel)
+		fmt.Fprintf(cmd.OutOrStdout(), "Enrolled %s (%s) in %s\nHost key %s\nNext: nexus fleet serve, or nexus fleet sync\n", name, enrolled.HostID, channel, fleet.Fingerprint(publicKey))
 		return nil
 	}}
 	c.Flags().StringVar(&name, "name", "", "unique host label, without paths or personal information")
@@ -171,7 +180,11 @@ func newFleetStatusCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"hostID": e.HostID, "name": e.Name, "repository": e.Repository, "channel": e.Channel, "active": state.Active, "previous": state.Previous, "lastCode": state.LastCode, "reportPending": state.Pending != nil})
+		status := map[string]any{"hostID": e.HostID, "name": e.Name, "repository": e.Repository, "channel": e.Channel, "active": state.Active, "previous": state.Previous, "lastCode": state.LastCode, "reportPending": state.Pending != nil}
+		if key, err := fleet.LoadHostKey(s.Root); err == nil {
+			status["hostKey"] = fleet.Fingerprint(fleet.EncodePublicKey(key.Public().(ed25519.PublicKey)))
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
 	}}
 }
 
@@ -261,4 +274,140 @@ func newFleetRemoveCmd() *cobra.Command {
 		}
 		return c.Admin(cmd.Context(), "DELETE", "hosts/"+args[1], nil, nil)
 	}}
+}
+
+func newFleetServeCmd() *cobra.Command {
+	var addr string
+	var interval, timeout time.Duration
+	c := &cobra.Command{Use: "serve", Short: "Keep this host's release current and answer local applications with it", Long: `Serve the active release on loopback as an OpenAI-compatible endpoint
+(/v1/chat/completions and /v1/models), and check for updates while it runs.
+
+Applications use http://<addr>/v1 as their base URL and the key printed by
+nexus fleet key. A new release is tested with the loaded one unloaded;
+requests during that test get 503 with Retry-After. The answer comes from the
+release's own system prompt, sampling settings and tools.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if timeout < time.Second || timeout > time.Hour || interval < 5*time.Second {
+			return errors.New("timeout must be 1s-1h and interval at least 5s")
+		}
+		s, err := store.Open()
+		if err != nil {
+			return err
+		}
+		e, err := fleet.LoadEnrollment(s.Root)
+		if err != nil {
+			return errors.New("enroll this host with nexus fleet join first")
+		}
+		client, err := fleet.NewClient(e.Repository, e.Token)
+		if err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+		defer stop()
+		logf := func(format string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) }
+		return fleet.Serve(ctx, s.Root, fleet.ServeOptions{Addr: addr, Interval: interval, Timeout: timeout, Control: client, Logf: logf})
+	}}
+	c.Flags().StringVar(&addr, "addr", "127.0.0.1:7720", "listen address (loopback only)")
+	c.Flags().DurationVar(&interval, "interval", 30*time.Second, "how often to check for an update")
+	c.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "maximum time to download and test one candidate")
+	return c
+}
+
+func newFleetKeyCmd() *cobra.Command {
+	return &cobra.Command{Use: "key", Short: "Print the API key local applications use with nexus fleet serve", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		s, err := store.Open()
+		if err != nil {
+			return err
+		}
+		if _, err = fleet.LoadEnrollment(s.Root); err != nil {
+			return errors.New("enroll this host with nexus fleet join first")
+		}
+		key, err := fleet.APIKey(s.Root)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), key)
+		return nil
+	}}
+}
+
+func newFleetRecordCmd() *cobra.Command {
+	var out string
+	c := &cobra.Command{Use: "record <registry/org> <release-id>", Short: "Download a release's signed host results and verify them", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := fleetOrgClient(args[0])
+		if err != nil {
+			return err
+		}
+		var rec fleet.Record
+		if err = c.Admin(cmd.Context(), "GET", "releases/"+args[1]+"/record", nil, &rec); err != nil {
+			return err
+		}
+		if out != "" {
+			b, err := json.MarshalIndent(rec, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err = os.WriteFile(out, append(b, '\n'), 0o600); err != nil {
+				return err
+			}
+		}
+		return printRecord(cmd, rec)
+	}}
+	c.Flags().StringVarP(&out, "output", "o", "", "also save the record to this file, for nexus fleet verify")
+	return c
+}
+
+func newFleetVerifyCmd() *cobra.Command {
+	return &cobra.Command{Use: "verify <record.json>", Short: "Verify a saved release record offline", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		b, err := os.ReadFile(args[0])
+		if err != nil {
+			return err
+		}
+		var rec fleet.Record
+		if err = json.Unmarshal(b, &rec); err != nil {
+			return errors.New("not a fleet release record")
+		}
+		return printRecord(cmd, rec)
+	}}
+}
+
+// printRecord shows each host's verdict and fails unless every report is
+// signed and valid.
+func printRecord(cmd *cobra.Command, rec fleet.Record) error {
+	w := cmd.OutOrStdout()
+	r := rec.Release
+	fmt.Fprintf(w, "Release %s\n  %s %s\n  artifact %s\n  runtime  %s\n\n", r.ID, r.Repository, r.Channel, r.Digest, r.RuntimeID)
+	checks := rec.Verify()
+	bad := 0
+	for _, c := range checks {
+		verdict := "verified"
+		if !c.Valid {
+			verdict, bad = "NOT VERIFIED: "+c.Problem, bad+1
+		}
+		fmt.Fprintf(w, "  %-20s %s\n", c.HostName, verdict)
+		if c.Statement != nil {
+			passed := 0
+			if c.Statement.Suite != nil {
+				for _, k := range c.Statement.Suite.Cases {
+					if k.Passed {
+						passed++
+					}
+				}
+			}
+			fmt.Fprintf(w, "  %-20s %s · %d/%d tests · signed %s\n", "", c.Statement.Status, c.Statement.Passed, c.Statement.Total, c.Statement.Time)
+			if c.Statement.Suite != nil {
+				fmt.Fprintf(w, "  %-20s suite %s (%d/%d cases)\n", "", c.Statement.Suite.Digest, passed, len(c.Statement.Suite.Cases))
+			}
+		}
+		if c.Fingerprint != "" {
+			fmt.Fprintf(w, "  %-20s key %s\n", "", c.Fingerprint)
+		}
+	}
+	if len(checks) == 0 {
+		fmt.Fprintln(w, "  no host has reported on this release")
+	}
+	fmt.Fprintln(w, "\nCompare each key with `nexus fleet status` on that host to confirm it is the host's own.")
+	if bad > 0 {
+		return fmt.Errorf("%d of %d report(s) could not be verified", bad, len(checks))
+	}
+	return nil
 }

@@ -27,8 +27,9 @@ the rest of its channel receives permission to activate it.
   An activated release can run while disconnected.
 
 Fleet accepts sealed, single-model chat agents with an included acceptance
-suite. The execution profile excludes tools, MCP servers, model
-auto-selection, and secrets. Test prompts and expected answers in the suite
+suite. An agent may use script tools and secrets (see
+[Tools and secrets](#tools-and-secrets)); MCP servers and model
+auto-selection are excluded. Test prompts and expected answers in the suite
 travel inside the published artifact: use synthetic, non-private examples.
 
 Run the commands below from the `nexusrun` source folder. Replace `YOUR_ORG`
@@ -76,6 +77,9 @@ independent installation on the same computer.
 
 Enrollment writes a private, repository-scoped host credential locally. It
 can check in and pull from its assigned repository; it cannot publish releases.
+Enrollment also creates the host's own signing key and prints its fingerprint;
+the private half never leaves the host (see
+[Signed release records](#signed-release-records)).
 Keep the NexusRun home private and do not copy it between hosts. After
 enrollment, polling uses this credential rather than your administrator login.
 
@@ -136,11 +140,59 @@ place; the watcher retries on its next interval. Only one Fleet operation uses
 a given home at a time. A watcher encountering an active invocation retries
 later, so update evaluation does not compete with it for model memory.
 
-Updates affect subsequent `fleet run` invocations. Fleet does not supervise
-an application process or restart in-flight work. Running an ordinary
+Updates affect subsequent `fleet run` invocations. Running an ordinary
 `nexus run` reference does not select the Fleet active release.
 
-## 5. See the fleet in Cloud
+## 5. Serve local applications
+
+`fleet serve` does what `watch` does and also answers applications on the same
+computer through an OpenAI-compatible endpoint:
+
+```sh
+./bin/nexus fleet serve
+./bin/nexus fleet key
+```
+
+`serve` listens on `127.0.0.1:7720` (change it with `--addr`; only loopback
+addresses are accepted). `fleet key` prints the API key, which stays the same
+across restarts. Point any OpenAI client at `http://127.0.0.1:7720/v1` with
+that key:
+
+```sh
+curl -s http://127.0.0.1:7720/v1/chat/completions \
+  -H "Authorization: Bearer $(./bin/nexus fleet key)" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"fleet-demo","messages":[{"role":"user","content":"What is 2 + 2?"}]}'
+```
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:7720/v1", api_key=FLEET_KEY)
+client.chat.completions.create(model="fleet-demo", messages=[{"role": "user", "content": "Hello"}])
+```
+
+- Every answer comes from the active release: its system prompt, sampling
+  settings, model and tools. A request's own system messages are added after
+  the release's system prompt. The `model` field is not used to choose
+  anything; `GET /v1/models` lists the active unit.
+- Each response names the release that produced it in the `X-Nexus-Release`
+  and `X-Nexus-Digest` headers, and the digest in `system_fingerprint`, so an
+  application can log exactly which tested version answered.
+- Requests that try to add their own `tools` are refused. Text content only.
+- `stream: true` returns standard server-sent event chunks; the answer arrives
+  once generation finishes, as one content chunk.
+- The model stays loaded between requests. When an update arrives, `serve`
+  unloads the current release, tests the candidate, and answers requests in
+  the meantime with `503` and `Retry-After: 30`. The first request after
+  activation loads the new release.
+- `serve` is the one process using this NexusRun home while it runs; `fleet
+  sync`, `watch` and `run` report that another fleet operation is in progress.
+- The endpoint has the same protections as `nexus serve`: requests must carry
+  the key, and web pages in a browser cannot reach it.
+
+Fleet does not supervise your application process or restart in-flight work.
+
+## 6. See the fleet in Cloud
 
 Open your organization in the Cloud dashboard and select **Fleet**. It shows
 host assignments, last check-in, reported hardware, active artifact/runtime,
@@ -158,7 +210,7 @@ Last check-in means the last report received, not continuous application
 health. A disconnected host continues using its local snapshot and Cloud
 retains its last reported state.
 
-## 6. Update, pause, or roll back
+## 7. Update, pause, or roll back
 
 Change `version` in `examples/fleet-demo/nexus.yaml` to `0.2.0`, adjust the
 instructions or tests, rebuild with `--seal`, and push the new version. Create
@@ -192,12 +244,63 @@ Removal blocks future check-ins and repository access, including already
 issued host bearer tokens. It does not remotely delete or disable an offline
 copy. Manage a lost computer through your normal device-security controls.
 
+## Tools and secrets
+
+A fleet agent can call script tools shipped in the unit and use secrets
+stored on each host. [examples/fleet-tools](../examples/fleet-tools) is an
+agent whose tool answers order-status questions and needs an access token.
+Its acceptance tests ask about orders whose status appears only in the
+unit's data file, so they pass only when the tool really ran.
+
+Set the agent's secrets on every host before you release it:
+
+```sh
+./bin/nexus secret set order-desk ORDERS_TOKEN
+```
+
+Secret values stay on the host: they are never part of the artifact, a
+check-in, or a release record. A host that lacks a required secret rejects
+the release with the code `secrets` and prints which secret to set. Like any
+rejection, this pauses the rollout, so set secrets everywhere first.
+
+Tools run as they do with `nexus run`: each call in the unit's sandbox, with
+only the capabilities the unit and tool declare, from a fresh private copy of
+the release's files. A tool may use a program the host provides, such as
+`/bin/sh` or `python3`. Each host runs the acceptance tests itself, so a host
+without that program fails them and keeps its working release.
+
+## Signed release records
+
+Each host signs every result it reports with its own key: what it tested
+(the artifact digest, runtime, and a digest of the acceptance suite), which
+cases passed, and whether it activated or rejected the release. Cloud keeps
+those signed statements and refuses a report that is unsigned, signed by a
+different key, or says something different from what the host claims.
+
+Download a release's record from the dashboard (**Signed record** on the
+release) or the CLI, and verify it anywhere, offline:
+
+```sh
+./bin/nexus fleet record registry.nexusrun.dev/YOUR_ORG PASTE_RELEASE_ID_HERE -o record.json
+./bin/nexus fleet verify record.json
+```
+
+`verify` checks every signature against the host's recorded key and checks
+that each signed statement matches the release and the result shown. It
+exits non-zero if any report fails. A record contains test case names and
+pass or fail, never prompts, answers, secrets, or host paths.
+
+The host keys in a record come from Cloud. To confirm a key is really a
+host's own, compare the fingerprint `verify` prints with the `hostKey` in
+`nexus fleet status` on that host (also printed by `fleet join`).
+
 ## Offline operation and storage
 
 Fleet's control plane uses outbound HTTPS; it adds no inbound listener on a
 host. An active release, its weights, and its managed runtime remain local.
-Check-ins contain hardware totals, release IDs, and acceptance counts/failure
-codes—not inference prompts, generated answers, local paths, or credentials.
+Check-ins contain hardware totals, release IDs, acceptance counts and failure
+codes, and the host's signed statement of the same with test case names—not
+inference prompts, generated answers, local paths, or credentials.
 
 Allow space for downloaded model layers, extraction during testing, and
 retained releases. Each release has an isolated store; shared model weights

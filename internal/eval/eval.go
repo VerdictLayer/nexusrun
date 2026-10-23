@@ -86,6 +86,12 @@ type Options struct {
 	// reason engine.SelectFrom takes its candidates as a parameter.
 	Backends []engine.Backend
 
+	// Generate, when set, answers each case in place of a single
+	// generation. A unit with tools needs it: its answer comes from the
+	// agent loop, so a suite that bypassed the loop would be scoring a
+	// unit that never runs.
+	Generate func(ctx context.Context, b engine.Backend, req engine.Request) (*engine.Result, error)
+
 	Progress func(format string, args ...any)
 }
 
@@ -366,7 +372,13 @@ func runTarget(ctx context.Context, c candidate, opts Options, temp float64, max
 
 		var caseTPS []float64
 		for run := 0; run < opts.Repeats; run++ {
-			res, err := c.backend.Generate(ctx, engine.Request{
+			generate := c.backend.Generate
+			if opts.Generate != nil {
+				generate = func(ctx context.Context, req engine.Request) (*engine.Result, error) {
+					return opts.Generate(ctx, c.backend, req)
+				}
+			}
+			res, err := generate(ctx, engine.Request{
 				ModelPath:   opts.ModelPath,
 				ModelRef:    opts.ModelRef,
 				Prompt:      cs.Prompt,

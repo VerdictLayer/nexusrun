@@ -58,9 +58,10 @@ type Evaluation struct {
 }
 
 type Checkin struct {
-	Hardware         Hardware    `json:"hardware"`
-	CurrentReleaseID *string     `json:"currentReleaseID"`
-	Report           *Evaluation `json:"report,omitempty"`
+	Hardware         Hardware     `json:"hardware"`
+	CurrentReleaseID *string      `json:"currentReleaseID"`
+	Report           *Evaluation  `json:"report,omitempty"`
+	Attestation      *Attestation `json:"attestation,omitempty"`
 }
 
 type Desired struct {

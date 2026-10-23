@@ -1,0 +1,14 @@
+apiVersion: nexusrun.dev/v1
+kind: EvalSuite
+name: order-desk-acceptance
+temperature: 0
+max_tokens: 96
+cases:
+  - name: shipped-order
+    prompt: What is the status of order 1042?
+    expect:
+      contains: ["ZX-55120"]
+  - name: held-order
+    prompt: Has order 2077 shipped yet?
+    expect:
+      contains: ["payment"]

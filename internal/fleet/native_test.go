@@ -32,3 +32,23 @@ func TestFleetRequiresExactlyOneMatchingSealedModel(t *testing.T) {
 		})
 	}
 }
+
+// Script tools and secrets run from the artifact and this host's own secret
+// store, so they are in the profile; MCP servers are started from outside it.
+func TestFleetProfileAllowsScriptToolsAndSecretsButNotMCP(t *testing.T) {
+	om := ocispec.Manifest{
+		Layers:      []ocispec.Descriptor{{MediaType: unit.MediaTypeModelGGUF, Annotations: map[string]string{unit.AnnotationModelID: "main"}}},
+		Annotations: map[string]string{unit.AnnotationSealed: "true"},
+	}
+	m := &manifest.Manifest{Models: []manifest.Model{{ID: "main"}}}
+	m.Entrypoint.Type = "chat"
+	m.Tools = []manifest.Tool{{Name: "lookup", Exec: manifest.ToolExec{Type: manifest.ToolExecScript, Command: []string{"tools/lookup.sh"}}}}
+	m.Secrets = []manifest.SecretRef{{Name: "API_TOKEN"}}
+	if _, err := modelLayer(m, om); err != nil {
+		t.Fatalf("tools and secrets refused: %v", err)
+	}
+	m.MCPServers = map[string]manifest.MCPServer{"files": {}}
+	if _, err := modelLayer(m, om); err == nil {
+		t.Fatal("accepted an MCP server")
+	}
+}

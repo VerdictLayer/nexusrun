@@ -54,6 +54,22 @@ type ScriptOptions struct {
 	Timeout time.Duration
 }
 
+// ToolDefs describes a unit's declared tools to the model.
+func ToolDefs(tools []manifest.Tool) []engine.ToolDef {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]engine.ToolDef, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, engine.ToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.Parameters,
+		})
+	}
+	return out
+}
+
 // NewScriptTools builds an executor for a unit's declared tools.
 func NewScriptTools(m *manifest.Manifest, opts ScriptOptions) *ScriptTools {
 	st := &ScriptTools{

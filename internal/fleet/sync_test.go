@@ -52,7 +52,10 @@ func TestSyncActivationIsAuthorizedAfterEvaluation(t *testing.T) {
 		}
 		return Desired{&r, true}, nil
 	})
-	result, err := Sync(context.Background(), home, hw, control, func(context.Context, Enrollment, Release) (int, int, string) { prepared = true; return 2, 2, "ok" })
+	result, err := Sync(context.Background(), home, hw, control, func(context.Context, Enrollment, Release) Outcome {
+		prepared = true
+		return Outcome{Passed: 2, Total: 2, Code: "ok"}
+	})
 	if err != nil || result.Status != "active" || calls != 3 {
 		t.Fatalf("%+v %v (%d checkins)", result, err, calls)
 	}
@@ -68,7 +71,7 @@ func TestRejectedCandidatePreservesLastWorkingRelease(t *testing.T) {
 			home, r := fixture(t)
 			old := r
 			old.ID = "33333333-3333-3333-3333-333333333333"
-			if err := SaveState(home, State{Active: &Activation{old, 2, 2}}); err != nil {
+			if err := SaveState(home, State{Active: &Activation{Release: old, Passed: 2, Total: 2}}); err != nil {
 				t.Fatal(err)
 			}
 			gotReport := false
@@ -81,7 +84,7 @@ func TestRejectedCandidatePreservesLastWorkingRelease(t *testing.T) {
 				}
 				return Desired{&r, true}, nil
 			})
-			result, err := Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) (int, int, string) { return 0, 0, code })
+			result, err := Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) Outcome { return Outcome{Passed: 0, Total: 0, Code: code} })
 			if err == nil || result.Status != "rejected" || !gotReport {
 				t.Fatalf("%+v %v", result, err)
 			}
@@ -114,7 +117,7 @@ func TestChangedOrPausedReleaseCannotActivateAfterEvaluation(t *testing.T) {
 				}
 				return Desired{&r, true}, nil
 			})
-			_, _ = Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) (int, int, string) { return 2, 2, "ok" })
+			_, _ = Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) Outcome { return Outcome{Passed: 2, Total: 2, Code: "ok"} })
 			s, _ := LoadState(home)
 			if s.Active != nil {
 				t.Fatal("changed authorization activated a candidate")
@@ -125,13 +128,13 @@ func TestChangedOrPausedReleaseCannotActivateAfterEvaluation(t *testing.T) {
 
 func TestOfflineKeepsActiveAndPendingReport(t *testing.T) {
 	home, r := fixture(t)
-	initial := State{Active: &Activation{r, 2, 2}, Pending: &Evaluation{r.ID, "active", 2, 2, "ok"}}
+	initial := State{Active: &Activation{Release: r, Passed: 2, Total: 2}, Pending: &Evaluation{r.ID, "active", 2, 2, "ok"}}
 	if err := SaveState(home, initial); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Sync(context.Background(), home, hw, controlFunc(func(context.Context, Checkin) (Desired, error) { return Desired{}, errors.New("offline") }), func(context.Context, Enrollment, Release) (int, int, string) {
+	_, err := Sync(context.Background(), home, hw, controlFunc(func(context.Context, Checkin) (Desired, error) { return Desired{}, errors.New("offline") }), func(context.Context, Enrollment, Release) Outcome {
 		t.Fatal("prepared while offline")
-		return 0, 0, ""
+		return Outcome{Passed: 0, Total: 0, Code: ""}
 	})
 	if err == nil {
 		t.Fatal("missing offline error")
@@ -152,7 +155,7 @@ func TestActivationReportIsRetriedAfterConnectionLoss(t *testing.T) {
 		}
 		return Desired{&r, true}, nil
 	})
-	result, err := Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) (int, int, string) { return 1, 1, "ok" })
+	result, err := Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) Outcome { return Outcome{Passed: 1, Total: 1, Code: "ok"} })
 	if err != nil || result.Code != "report_pending" {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -166,9 +169,9 @@ func TestActivationReportIsRetriedAfterConnectionLoss(t *testing.T) {
 		}
 		return Desired{&r, true}, nil
 	})
-	if _, err = Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) (int, int, string) {
+	if _, err = Sync(context.Background(), home, hw, c, func(context.Context, Enrollment, Release) Outcome {
 		t.Fatal("reevaluated active release")
-		return 0, 0, ""
+		return Outcome{Passed: 0, Total: 0, Code: ""}
 	}); err != nil {
 		t.Fatal(err)
 	}
