@@ -17,6 +17,11 @@ import markdown
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = {"QUICKSTART.md": "get-started", "OFFLINE_DEMO.md": "offline-demo", "FLEET.md": "fleet-guide"}
+DESCRIPTIONS = {
+    "get-started": "Set up a small local AI helper with Ollama and NexusRun, then prepare it for offline use. Step-by-step instructions and complete YAML.",
+    "offline-demo": "Package a local AI agent, NexusRun and a pinned llama.cpp runtime into one bundle, then run it on an offline Linux computer.",
+    "fleet-guide": "Enroll Linux computers, release an agent through canaries, serve it to local apps, and verify each host's signed test results.",
+}
 
 
 class WebsiteLinks(HTMLParser):
@@ -29,7 +34,8 @@ class WebsiteLinks(HTMLParser):
         for key, value in attrs:
             if key == "href" and value:
                 url = urlsplit(value)
-                if not url.scheme and not url.netloc and url.path.endswith(".md"):
+                # Every relative link points into the repository; only the guides themselves become pages.
+                if not url.scheme and not url.netloc and url.path:
                     path = posixpath.normpath(posixpath.join("docs", url.path))
                     page = PAGES.get(path.removeprefix("docs/")) if path.startswith("docs/") else None
                     value = ("/" + page) if page else ("https://github.com/verdictlayer/nexusrun/blob/main/" + path)
@@ -64,6 +70,7 @@ def main():
         body = WebsiteLinks()
         body.feed(renderer.convert(document))
         page = template.replace("{{TITLE}}", html.escape(title)).replace("{{SLUG}}", slug)
+        page = page.replace("{{DESCRIPTION}}", html.escape(DESCRIPTIONS[slug]))
         page = page.replace("{{SOURCE}}", source).replace("{{TOC}}", renderer.toc).replace("{{BODY}}", "".join(body.output))
         (args.output / (slug + ".html")).write_text(page)
         print(args.output / (slug + ".html"))

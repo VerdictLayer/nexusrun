@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+<meta charset="utf-8">
 <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
 new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
@@ -18,104 +18,278 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 
   gtag('config', 'G-31LHFJYC2Y');
 </script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{TITLE}} · NexusRun</title>
-  <meta name="description" content="Set up a small local AI helper with Ollama and NexusRun, then prepare it for offline use. Step-by-step instructions and complete YAML.">
-  <meta name="color-scheme" content="dark light">
-  <link rel="canonical" href="https://nexusrun.dev/{{SLUG}}">
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <style>
-    :root { color-scheme: dark; --bg:#12161a; --panel:#191e23; --ink:#e4e9ed; --muted:#a8b1b9; --rule:#343d46; --accent:#ff8b59; }
-    @media(prefers-color-scheme:light) { :root { color-scheme:light; --bg:#f6f7f8; --panel:#fff; --ink:#14191e; --muted:#515d68; --rule:#d1d8de; --accent:#b83b09; } }
-    * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.75 system-ui,-apple-system,"Segoe UI",sans-serif; }
-    a { color:var(--accent); text-underline-offset:3px; overflow-wrap:anywhere; }
-    a:hover { text-decoration-thickness:2px; }
-    a:focus-visible,button:focus-visible { outline:3px solid var(--accent); outline-offset:4px; }
-    header { border-bottom:1px solid var(--rule); }
-    nav { max-width:1140px; margin:auto; padding:20px 24px; display:flex; align-items:center; gap:12px 24px; flex-wrap:wrap; }
-    nav a { color:var(--ink); text-decoration:none; font-size:15px; }
-    nav .brand { margin-right:auto; font-size:21px; font-weight:750; letter-spacing:-.7px; }
-    nav .brand span { color:var(--accent); }
-    .layout { max-width:1140px; margin:48px auto 80px; padding:0 24px; display:grid; grid-template-columns:220px minmax(0,1fr); gap:56px; }
-    aside { font-size:14px; align-self:start; position:sticky; top:24px; }
-    aside p { color:var(--muted); margin:0 0 12px; }
-    aside ul { padding-left:16px; }
-    aside li { margin:9px 0; }
-    aside a { color:var(--muted); }
-    main { min-width:0; max-width:760px; }
-    h1 { font-size:clamp(2rem,4.5vw,3rem); line-height:1.12; letter-spacing:-1.2px; margin:0 0 28px; }
-    h2 { font-size:1.65rem; line-height:1.3; margin:52px 0 18px; padding-top:18px; border-top:1px solid var(--rule); }
-    h3 { font-size:1.2rem; margin-top:32px; }
-    h1,h2,h3 { scroll-margin-top:24px; }
-    p { margin:0 0 20px; }
-    li { margin-bottom:8px; }
-    code { font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:.86em; overflow-wrap:anywhere; }
-    :not(pre)>code { background:var(--panel); border:1px solid var(--rule); border-radius:4px; padding:1px 4px; }
-    .code-block { margin:24px 0; border:1px solid var(--rule); border-radius:8px; background:var(--panel); overflow:hidden; }
-    .code-toolbar { padding:6px 12px; border-bottom:1px solid var(--rule); display:flex; justify-content:flex-end; }
-    button { font:inherit; font-size:13px; color:var(--ink); background:var(--bg); border:1px solid var(--rule); border-radius:5px; padding:4px 12px; cursor:pointer; }
-    pre { margin:24px 0; padding:18px; overflow:auto; background:var(--panel); border:1px solid var(--rule); border-radius:8px; line-height:1.6; }
-    .code-block pre { margin:0; border:0; border-radius:0; }
-    pre code { overflow-wrap:normal; white-space:pre; }
-    .table-scroll { overflow-x:auto; margin:24px 0; }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th,td { text-align:left; vertical-align:top; border:1px solid var(--rule); padding:12px; min-width:140px; }
-    th { background:var(--panel); }
-    footer { border-top:1px solid var(--rule); padding-top:24px; margin-top:52px; font-size:14px; color:var(--muted); }
-    .skip { position:absolute; left:16px; top:-100px; padding:10px; background:var(--panel); }
-    .skip:focus { top:8px; }
-    @media(max-width:800px) { .layout { grid-template-columns:minmax(0,1fr); gap:28px; margin-top:32px; } aside { position:static; border-bottom:1px solid var(--rule); padding-bottom:12px; } aside .toc>ul { columns:2; column-gap:24px; } aside .toc li { break-inside:avoid; } }
-    @media(max-width:480px) { body { font-size:16px; } nav,.layout { padding-left:18px; padding-right:18px; } nav { gap:12px 18px; } nav .brand { width:100%; } aside .toc>ul { columns:1; } }
-  </style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="{{DESCRIPTION}}">
+<link rel="canonical" href="https://nexusrun.dev/{{SLUG}}">
+<meta name="theme-color" content="#F4F1EA">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NexusRun">
+<meta property="og:url" content="https://nexusrun.dev/{{SLUG}}">
+<meta property="og:title" content="{{TITLE}} · NexusRun">
+<meta property="og:description" content="{{DESCRIPTION}}">
+<meta property="og:image" content="https://nexusrun.dev/og-v2.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="NexusRun: portable AI agents and tested releases.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{TITLE}} · NexusRun">
+<meta name="twitter:description" content="{{DESCRIPTION}}">
+<meta name="twitter:image" content="https://nexusrun.dev/og-v2.png">
+<meta name="twitter:image:alt" content="NexusRun: portable AI agents and tested releases.">
+<title>{{TITLE}} · NexusRun</title>
+<style>
+@font-face{font-family:"Geist";src:url(/fonts/geist.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Geist Mono";src:url(/fonts/geist-mono.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Instrument Serif";src:url(/fonts/instrument-serif.woff2) format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"Instrument Serif";src:url(/fonts/instrument-serif-italic.woff2) format("woff2");font-weight:400;font-style:italic;font-display:swap}
+:root{
+  --paper:#F4F1EA; --paper2:#EAE5DA; --card:#FFFFFF; --ink:#101113; --ink2:#43464A; --stone:#857F76; --rule:#DCD5C8;
+  --night:#090A0C; --panel:#121418; --edge:rgba(255,255,255,.08); --edge2:rgba(255,255,255,.15);
+  --snow:#F4F4F1; --fog:#A3A8AD; --ash:#6E747A;
+  --or:#FF6B2C; --or-ink:#C7440C; --ok:#2FBF71; --ok-ink:#147A45; --amber:#E9A93A; --red:#E5484D;
+  --sans:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --serif:"Instrument Serif",Georgia,serif;
+  --ease:cubic-bezier(.2,.7,.1,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+body{background:var(--paper);color:var(--ink);font:17px/1.55 var(--sans);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+:focus-visible{outline:2px solid var(--or);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1200px;margin:0 auto;padding-left:32px;padding-right:32px}
+.mono,code{font-family:var(--mono)}
+h1,h2,h3{text-wrap:balance;font-weight:600}
+p{text-wrap:pretty}
+.skip{position:absolute;left:-999px;top:8px;background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:8px;z-index:100}
+.skip:focus{left:16px}
+.js .rv{opacity:0;transform:translateY(22px);transition:opacity .9s var(--ease),transform .9s var(--ease)}
+.js .rv.in{opacity:1;transform:none}
+.js .d1{transition-delay:.08s}.js .d2{transition-delay:.16s}.js .d3{transition-delay:.24s}
+
+/* nav */
+.nav{position:sticky;top:0;z-index:50;background:rgba(244,241,234,.82);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);border-bottom:1px solid transparent;transition:border-color .3s,background .3s,color .3s}
+.nav.line{border-color:var(--rule)}
+.nav.dark{background:rgba(9,10,12,.8);color:var(--snow);border-color:var(--edge)}
+.nav .wrap{display:flex;align-items:center;height:62px;gap:40px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em}
+.logo b{color:var(--or-ink);font-weight:600}
+.nav.dark .logo b,.dark .logo b{color:var(--or)}
+.nav ul{display:flex;gap:30px;list-style:none;font-size:15px;color:var(--ink2)}
+.nav.dark ul{color:var(--fog)}
+.nav ul a{transition:color .2s}
+.nav ul a:hover,.nav ul a[aria-current]{color:var(--ink)}
+.nav.dark ul a:hover,.nav.dark ul a[aria-current]{color:var(--snow)}
+.nav .r{margin-left:auto;display:flex;align-items:center;gap:22px;font-size:15px}
+.menu-btn{display:none;width:40px;height:40px;border:0;background:transparent;color:inherit;border-radius:10px;cursor:pointer;place-items:center}
+.menu-btn svg{width:22px;height:22px}
+.sheet{display:none}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:50px;padding:0 26px;border-radius:999px;font:500 16px var(--sans);letter-spacing:-.01em;transition:transform .2s var(--ease),background .2s,color .2s,box-shadow .2s;white-space:nowrap;border:0;cursor:pointer}
+.btn:active{transform:scale(.97)}
+.btn.sm{height:38px;padding:0 18px;font-size:14.5px}
+.btn.ink{background:var(--ink);color:var(--paper)}
+.btn.ink:hover{background:var(--or-ink)}
+.nav.dark .btn.ink{background:var(--snow);color:var(--night)}
+.btn.line{box-shadow:0 0 0 1.5px var(--ink) inset;color:var(--ink);background:transparent}
+.btn.line:hover{background:var(--ink);color:var(--paper)}
+.btn.or{background:var(--or);color:#1A0800}
+.btn.or:hover{background:#FF7F47}
+.btn.ghost{box-shadow:0 0 0 1px var(--edge2) inset;color:var(--snow);background:transparent}
+.btn.ghost:hover{box-shadow:0 0 0 1px rgba(255,255,255,.45) inset}
+.tlink{color:var(--or-ink);font-weight:500;display:inline-flex;gap:6px;align-items:center}
+.tlink::after{content:"→";transition:transform .2s var(--ease)}
+.tlink:hover::after{transform:translateX(3px)}
+.dark .tlink{color:var(--or)}
+
+/* section heads */
+.kick{font:600 17px var(--sans);color:var(--or-ink);letter-spacing:-.01em}
+.dark .kick{color:var(--or)}
+.h2{font-size:clamp(38px,4.6vw,64px);line-height:1.02;letter-spacing:-.045em;margin-top:16px}
+.h2 span{color:var(--stone)}
+.dark .h2 span{color:var(--ash)}
+.sub{font-size:clamp(19px,1.6vw,21px);line-height:1.5;color:var(--ink2);max-width:36em;margin-top:24px}
+.dark .sub{color:var(--fog)}
+.head{padding-top:150px}
+.head.center{text-align:center}.head.center .sub{margin-left:auto;margin-right:auto}
+.dark{background:var(--night);color:var(--snow)}
+
+/* page hero for inner pages */
+.phero{padding:110px 0 96px}
+.phero h1{font-size:clamp(46px,6.4vw,92px);line-height:.97;letter-spacing:-.055em;max-width:15ch}
+.phero h1 span{color:var(--stone)}
+.dark.phero h1 span{color:var(--ash)}
+.phero .sub{margin-top:30px}
+.phero .cta{display:flex;gap:12px;margin-top:40px;flex-wrap:wrap;align-items:center}
+.phero .note{margin-top:20px;font-size:15px;color:var(--stone)}
+
+/* shared bits */
+.c-d{color:var(--ash)}.c-s{color:#B9E18F}.c-k{color:#94C2FF}.c-w{color:#fff}.c-g{color:#5FD392}.c-o{color:var(--or)}
+.term{border-radius:16px;background:#0F1114;color:#D2D5D8;padding:20px 22px;font:14.5px/1.85 var(--mono);overflow-x:auto;white-space:pre;box-shadow:0 0 0 1px rgba(0,0,0,.06)}
+.term b{color:var(--or);font-weight:400}
+.term i{color:var(--ash);font-style:normal}
+.points{display:grid;grid-template-columns:repeat(4,1fr);gap:40px}
+.points h3,.points h4{font-size:20px;letter-spacing:-.02em;font-weight:600}
+.points p{font-size:17px;margin-top:8px;color:var(--ink2)}
+.dark .points p{color:var(--fog)}
+.points i{display:block;width:28px;height:2px;background:var(--or-ink);margin-bottom:20px}
+.dark .points i{background:var(--or)}
+.card{border-radius:24px;background:var(--card);box-shadow:0 0 0 1px var(--rule)}
+
+/* footer */
+footer.site{background:var(--night);color:var(--ash);border-top:1px solid var(--edge);padding:60px 0 44px;font-size:15px}
+footer.site .wrap{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:32px}
+footer.site .logo{color:var(--snow)}
+footer.site p{margin-top:14px;max-width:30ch;color:var(--ash)}
+footer.site h2{font-weight:500;color:var(--fog);font-size:14.5px;margin-bottom:14px;letter-spacing:0}
+footer.site ul{list-style:none;display:grid;gap:10px}
+footer.site ul a:hover{color:var(--snow)}
+footer.site .base{grid-column:1/-1;display:flex;justify-content:space-between;border-top:1px solid var(--edge);padding-top:24px;margin-top:20px;flex-wrap:wrap;gap:12px}
+
+@media (max-width:1020px){
+  .nav ul,.nav .r .si{display:none}
+  .menu-btn{display:grid}
+  .nav .r{gap:8px}
+  .sheet{position:fixed;inset:62px 0 auto;z-index:49;background:var(--paper);border-bottom:1px solid var(--rule);padding:12px 16px 24px;box-shadow:0 30px 60px -30px rgba(30,20,6,.35)}
+  .sheet.open{display:block}
+  .sheet a{display:block;padding:14px 4px;font-size:19px;font-weight:500;border-bottom:1px solid var(--paper2)}
+  .sheet a:last-child{border-bottom:0}
+  .points{grid-template-columns:1fr 1fr}
+  footer.site .wrap{grid-template-columns:1fr 1fr}
+  .head{padding-top:110px}
+  .phero{padding:72px 0 72px}
+}
+@media (max-width:640px){
+  .wrap{padding-left:16px;padding-right:16px}
+  .points{grid-template-columns:1fr;gap:32px}
+  .head{padding-top:88px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .js .rv{opacity:1;transform:none}
+}
+
+.guide{display:grid;grid-template-columns:230px minmax(0,1fr);gap:72px;padding-top:72px;padding-bottom:140px}
+.guide aside{position:sticky;top:96px;align-self:start;font-size:15px;max-height:calc(100vh - 120px);overflow:auto}
+.guide aside p{font-weight:600;color:var(--ink);margin-bottom:12px}
+.guide aside ul{list-style:none}
+.guide aside ul ul{padding-left:14px}
+.guide aside li{margin:9px 0}
+.guide aside a{color:var(--stone)}
+.guide aside a:hover{color:var(--ink)}
+.prose{max-width:760px;min-width:0;font-size:18px;line-height:1.7;color:var(--ink2)}
+.prose h1{font-size:clamp(40px,5vw,68px);line-height:1;letter-spacing:-.05em;color:var(--ink);margin-bottom:32px}
+.prose h2{font-size:30px;letter-spacing:-.03em;line-height:1.15;color:var(--ink);margin:64px 0 16px;padding-top:28px;border-top:1px solid var(--rule)}
+.prose h3{font-size:21px;letter-spacing:-.02em;color:var(--ink);margin:36px 0 10px}
+.prose h1,.prose h2,.prose h3{scroll-margin-top:90px}
+.prose p{margin:0 0 20px}
+.prose ul,.prose ol{margin:0 0 20px 24px}
+.prose li{margin-bottom:8px}
+.prose strong{color:var(--ink);font-weight:600}
+.prose a{color:var(--or-ink);text-decoration:underline;text-decoration-color:#E8C3AE;text-underline-offset:3px;overflow-wrap:anywhere}
+.prose :not(pre)>code{font-size:.86em;background:var(--paper2);border-radius:5px;padding:1px 6px;overflow-wrap:anywhere}
+.code-block{margin:24px 0;border-radius:16px;background:#0F1114;overflow:hidden}
+.code-toolbar{display:flex;justify-content:flex-end;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07)}
+.code-toolbar button{font:500 13px var(--sans);color:#C9CDD1;background:rgba(255,255,255,.06);border:0;border-radius:8px;padding:5px 12px;cursor:pointer}
+.code-toolbar button:hover{background:rgba(255,255,255,.12)}
+.prose pre{margin:24px 0;padding:20px 22px;overflow:auto;background:#0F1114;color:#D5D8DB;border-radius:16px;font:14.5px/1.75 var(--mono)}
+.code-block pre{margin:0;border-radius:0}
+.prose pre code{white-space:pre;font-family:var(--mono)}
+.table-scroll{overflow-x:auto;margin:24px 0;border-radius:16px;box-shadow:0 0 0 1px var(--rule);background:var(--card)}
+.prose table{width:100%;border-collapse:collapse;font-size:15.5px}
+.prose th,.prose td{text-align:left;vertical-align:top;padding:13px 16px;border-bottom:1px solid var(--paper2);min-width:140px}
+.prose th{color:var(--ink);font-weight:600;background:#FBF8F2}
+.prose tr:last-child td{border-bottom:0}
+.prose .source{margin-top:64px;padding-top:24px;border-top:1px solid var(--rule);font-size:15.5px;color:var(--stone)}
+@media (max-width:1020px){.guide{grid-template-columns:minmax(0,1fr);gap:32px;padding-top:48px}.guide aside{position:static;max-height:none;padding-bottom:20px;border-bottom:1px solid var(--rule)}}
+</style>
+<script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
 <!-- Google Tag Manager (noscript) -->
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NVCFBTDC"
 height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <!-- End Google Tag Manager (noscript) -->
-  <a class="skip" href="#content">Skip to guide</a>
-  <header><nav aria-label="Main navigation">
-    <a class="brand" href="/">nexus<span>run</span></a>
-    <a href="/get-started">First helper</a>
-    <a href="/offline-demo">Offline guide</a>
-    <a href="/fleet-guide">Fleet guide</a>
-    <a href="https://github.com/verdictlayer/nexusrun">GitHub ↗</a>
-  </nav></header>
-  <div class="layout">
-    <aside aria-label="On this page"><p>ON THIS PAGE</p>{{TOC}}</aside>
-    <main id="content">
-      {{BODY}}
-      <footer>These instructions also live <a href="https://github.com/verdictlayer/nexusrun/blob/main/docs/{{SOURCE}}">on GitHub</a>.<br>Runs on your computer. Apache 2.0.</footer>
-    </main>
-  </div>
-  <script>
-    document.querySelectorAll('pre').forEach(function(pre) {
-      var code = pre.querySelector('code');
-      if (!code) return;
-      var wrapper = document.createElement('div');
-      wrapper.className = 'code-block';
-      var bar = document.createElement('div');
-      bar.className = 'code-toolbar';
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = 'Copy';
-      button.setAttribute('aria-label', code.classList.contains('language-yaml') ? 'Copy YAML configuration' : 'Copy commands');
-      button.setAttribute('aria-live', 'polite');
-      button.addEventListener('click', async function() {
-        try { await navigator.clipboard.writeText(code.textContent); button.textContent = 'Copied'; }
-        catch (e) { button.textContent = 'Select text to copy'; }
-        setTimeout(function() { button.textContent = 'Copy'; }, 2500);
-      });
-      pre.parentNode.insertBefore(wrapper,pre);
-      bar.appendChild(button); wrapper.appendChild(bar); wrapper.appendChild(pre);
-    });
-    document.querySelectorAll('table').forEach(function(table) {
-      var wrapper = document.createElement('div');
-      wrapper.className = 'table-scroll'; wrapper.tabIndex = 0;
-      wrapper.setAttribute('role','region'); wrapper.setAttribute('aria-label','Scrollable reference table');
-      table.parentNode.insertBefore(wrapper,table); wrapper.appendChild(table);
-    });
-  </script>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav" id="nav"><div class="wrap">
+  <a class="logo" href="/" aria-label="NexusRun home"><svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="4" width="10" height="10" rx="2.2" fill="#FF6B2C"/><rect x="18" y="18" width="10" height="10" rx="2.2" fill="#FF6B2C"/><path d="M14 9h4.5a3 3 0 0 1 3 3v6" fill="none" stroke="#FF6B2C" stroke-width="3" stroke-linecap="round"/></svg><span>nexus<b>run</b></span></a>
+  <ul><li><a href="/cloud">Cloud</a></li><li><a href="/downloads">Download</a></li><li><a href="/cloud#pricing">Pricing</a></li><li><a href="/get-started" aria-current="page">Docs</a></li><li><a href="https://github.com/verdictlayer/nexusrun">GitHub</a></li></ul>
+  <div class="r"><a class="si" href="https://app.nexusrun.dev/">Sign in</a><a class="btn sm ink" href="https://app.nexusrun.dev/">Start free</a>
+    <button class="menu-btn" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="sheet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h16M4 16h16"/></svg></button></div>
+</div></header>
+<nav class="sheet" id="sheet" aria-label="Menu"><a href="/cloud">Cloud</a><a href="/downloads">Download</a><a href="/cloud#pricing">Pricing</a><a href="/get-started">Docs</a><a href="https://github.com/verdictlayer/nexusrun">GitHub</a><a href="https://app.nexusrun.dev/">Sign in</a></nav>
+<main id="main">
+<div class="wrap guide">
+  <aside aria-label="On this page"><p>On this page</p>{{TOC}}</aside>
+  <article class="prose">
+{{BODY}}
+    <p class="source">These instructions also live <a href="https://github.com/verdictlayer/nexusrun/blob/main/docs/{{SOURCE}}">on GitHub</a>. Runs on your computer. Apache 2.0.</p>
+  </article>
+</div>
+</main>
+<footer class="site dark"><div class="wrap">
+  <div><a class="logo" href="/"><svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="4" width="10" height="10" rx="2.2" fill="#FF6B2C"/><rect x="18" y="18" width="10" height="10" rx="2.2" fill="#FF6B2C"/><path d="M14 9h4.5a3 3 0 0 1 3 3v6" fill="none" stroke="#FF6B2C" stroke-width="3" stroke-linecap="round"/></svg><span>nexus<b>run</b></span></a><p>Portable AI agents, and tested releases to the machines that run them.</p></div>
+  <div><h2>Product</h2><ul><li><a href="/cloud">NexusRun Cloud</a></li><li><a href="/fleet-guide">Fleet guide</a></li><li><a href="/downloads#studio">Studio</a></li><li><a href="/cloud#pricing">Pricing</a></li></ul></div>
+  <div><h2>Developers</h2><ul><li><a href="/get-started">Get started</a></li><li><a href="/offline-demo">Offline bundle</a></li><li><a href="https://github.com/verdictlayer/nexusrun/blob/main/docs/REFERENCE.md">Reference</a></li><li><a href="/downloads">Downloads</a></li><li><a href="https://github.com/verdictlayer/nexusrun">GitHub</a></li></ul></div>
+  <div><h2>Company</h2><ul><li><a href="mailto:hello@nexusrun.dev">Contact</a></li><li><a href="/terms">Terms</a></li><li><a href="/privacy">Privacy</a></li></ul></div>
+  <div class="base"><span>© 2026 NexusRun</span><span>The runtime is open source under Apache 2.0</span></div>
+</div></footer>
+<script>
+(() => {
+  // Fade sections in as they arrive. Without this script everything is simply visible.
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), {rootMargin: '0px 0px -8% 0px'});
+  document.querySelectorAll('.rv').forEach(el => io.observe(el));
+
+  // The bar gets a hairline once scrolled, and turns dark over dark sections.
+  const nav = document.getElementById('nav');
+  const darks = [...document.querySelectorAll('.dark:not(footer)')];
+  const onScroll = () => {
+    nav.classList.toggle('line', scrollY > 10);
+    nav.classList.toggle('dark', darks.some(s => { const r = s.getBoundingClientRect(); return r.top <= 31 && r.bottom > 31; }));
+  };
+  addEventListener('scroll', () => requestAnimationFrame(onScroll), {passive: true});
+  onScroll();
+
+  // Small screens: the menu button opens a sheet with every link.
+  const btn = document.getElementById('menu-btn'), sheet = document.getElementById('sheet');
+  const close = () => { sheet.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', () => { const open = !sheet.classList.contains('open'); sheet.classList.toggle('open', open); btn.setAttribute('aria-expanded', String(open)); });
+  sheet.addEventListener('click', e => { if (e.target.closest('a')) close(); });
+  addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+  // Copy buttons on command blocks.
+  document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+    const src = document.getElementById(b.dataset.copy);
+    try { await navigator.clipboard.writeText(src.innerText.replace(/^\$ /gm, '')); b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1500); } catch {}
+  }));
+})();
+
+document.querySelectorAll('.prose pre').forEach(pre => {
+  const code = pre.querySelector('code');
+  if (!code) return;
+  const wrapper = document.createElement('div'), bar = document.createElement('div'), button = document.createElement('button');
+  wrapper.className = 'code-block'; bar.className = 'code-toolbar';
+  button.type = 'button'; button.textContent = 'Copy'; button.setAttribute('aria-live', 'polite');
+  button.setAttribute('aria-label', code.classList.contains('language-yaml') ? 'Copy YAML configuration' : 'Copy commands');
+  button.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(code.textContent); button.textContent = 'Copied'; }
+    catch { button.textContent = 'Select text to copy'; }
+    setTimeout(() => (button.textContent = 'Copy'), 2500);
+  });
+  pre.parentNode.insertBefore(wrapper, pre); bar.appendChild(button); wrapper.append(bar, pre);
+});
+document.querySelectorAll('.prose table').forEach(table => {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'table-scroll'; wrapper.tabIndex = 0;
+  wrapper.setAttribute('role', 'region'); wrapper.setAttribute('aria-label', 'Scrollable reference table');
+  table.parentNode.insertBefore(wrapper, table); wrapper.appendChild(table);
+});
+</script>
 </body>
 </html>
